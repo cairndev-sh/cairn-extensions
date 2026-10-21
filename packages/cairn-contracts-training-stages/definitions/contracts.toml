@@ -1,0 +1,77 @@
+format = "cairn.contracts/1"
+
+[distribution]
+name = "cairn-contracts-training-stages"
+version = "1.0.0"
+
+[[definitions]]
+id = "training.stage.sample_fidelity"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/training.stage.sample_fidelity.json"
+
+[[definitions]]
+id = "training.stage.sample_fidelity.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.sample_fidelity.configuration.json"
+
+[[definitions]]
+id = "training.stage.sample_fidelity.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.sample_fidelity.output.json"
+
+[[definitions]]
+id = "training.stage.train_qlora"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/training.stage.train_qlora.json"
+
+[[definitions]]
+id = "training.stage.train_qlora.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.train_qlora.configuration.json"
+
+[[definitions]]
+id = "training.stage.train_qlora.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.train_qlora.output.json"
+
+[[definitions]]
+id = "training.stage.eval_checkpoints"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/training.stage.eval_checkpoints.json"
+
+[[definitions]]
+id = "training.stage.eval_checkpoints.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.eval_checkpoints.configuration.json"
+
+[[definitions]]
+id = "training.stage.eval_checkpoints.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.eval_checkpoints.output.json"
+
+[[definitions]]
+id = "training.stage.package_adapter"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/training.stage.package_adapter.json"
+
+[[definitions]]
+id = "training.stage.package_adapter.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.package_adapter.configuration.json"
+
+[[definitions]]
+id = "training.stage.package_adapter.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/training.stage.package_adapter.output.json"

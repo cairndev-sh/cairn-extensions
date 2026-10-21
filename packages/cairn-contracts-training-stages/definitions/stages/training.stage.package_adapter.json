@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "training.stage.package_adapter",
+  "revision": "1.0.0",
+  "summary": "`package.adapter` — Package the accepted candidate: a candidate.json manifest naming the adapter URI and provenance, and the candidate's content identity (output + content_hash + kind: model, #2189) the runner turns into the model descriptor the control plane registers.",
+  "configuration": "contract://training.stage.package_adapter.configuration/1.0.0",
+  "output": "contract://training.stage.package_adapter.output/1.0.0"
+}

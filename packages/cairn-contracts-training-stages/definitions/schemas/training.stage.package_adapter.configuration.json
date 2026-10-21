@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.package_adapter.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "base_model": {
+      "type": "string",
+      "description": "The base model, when train_result.json does not carry it."
+    }
+  },
+  "additionalProperties": false
+}

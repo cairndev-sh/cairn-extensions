@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.eval_checkpoints.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "max_train_loss": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Ceiling on train_loss; unset, empty or non-positive = no ceiling."
+    },
+    "max_eval_loss": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Ceiling on eval_loss; unset, empty or non-positive = no ceiling."
+    },
+    "fail_on_reject": {
+      "type": [
+        "boolean",
+        "string"
+      ],
+      "description": "Default true: a rejected checkpoint fails the stage."
+    }
+  },
+  "additionalProperties": false
+}

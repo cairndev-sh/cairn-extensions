@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "training.stage.sample_fidelity",
+  "revision": "1.0.0",
+  "summary": "`sample.fidelity` — Train on a deterministic subsample (the fidelity knob, #2029): keep the rows with the smallest H(seed ‖ row_hash) and record seed, n and the order-independent row-hash digest. A no-op when no fidelity is set.",
+  "configuration": "contract://training.stage.sample_fidelity.configuration/1.0.0",
+  "output": "contract://training.stage.sample_fidelity.output/1.0.0"
+}

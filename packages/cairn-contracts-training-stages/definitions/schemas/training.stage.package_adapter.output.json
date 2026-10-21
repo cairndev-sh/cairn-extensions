@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.package_adapter.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "packaged": {
+      "type": "boolean",
+      "description": "Always true: the manifest was written."
+    },
+    "candidate_uri": {
+      "type": "string",
+      "description": "The adapter URI the candidate names."
+    },
+    "candidate_manifest": {
+      "type": "string",
+      "description": "Path of candidate.json."
+    },
+    "candidate_hashed": {
+      "type": "boolean",
+      "description": "Whether the adapter bytes were here to hash (a remote-only URI is reported, never faked)."
+    },
+    "base_model": {
+      "type": "string",
+      "description": "The base model."
+    },
+    "method": {
+      "type": "string",
+      "description": "qlora | lora, from the training metrics."
+    },
+    "spec_digest": {
+      "type": "string",
+      "description": "sha256 of adapter_config.json, when present."
+    },
+    "output": {
+      "type": "string",
+      "description": "The product: the adapter URI (present when hashed)."
+    },
+    "content_hash": {
+      "type": "string",
+      "description": "sha256 over the sorted candidate files (present when hashed)."
+    },
+    "bytes": {
+      "type": "integer",
+      "description": "Bytes hashed (present when hashed).",
+      "minimum": 0
+    },
+    "kind": {
+      "type": "string",
+      "description": "`model` — what the registry registers (present when hashed)."
+    }
+  },
+  "required": [
+    "packaged",
+    "candidate_uri",
+    "candidate_manifest",
+    "candidate_hashed"
+  ]
+}
