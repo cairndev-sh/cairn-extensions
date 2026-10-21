@@ -1,0 +1,21 @@
+# The `python` job against the core's main branch (ADR-0128 D3), so a core change that breaks
+# an extension is seen the next morning, not at the next release.
+name: nightly
+'on':
+  schedule:
+  - cron: '17 4 * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  python-core-main:
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: '3.13'
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with:
+        version: 0.11.9
+    - name: Every wheel on the core's main branch
+      run: scripts/test_wheels.sh --core main

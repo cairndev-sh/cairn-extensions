@@ -1,0 +1,23 @@
+# cairn-extensions — a uv workspace of the extension wheels only (ADR-0128 D1). There is no
+# root project and no lock: CI installs each wheel with the RELEASED `cairndev` its own pins
+# select (ADR-0128 D3), never a checkout of the core. Contract wheels (data only) are installed
+# non-editable; each package that needs it says so in [tool.uv.sources] below as it lands.
+[tool.uv.workspace]
+members = ["packages/*", "packs/*"]
+
+[tool.uv.sources]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "expensive: calls a paid model or service; not run in CI",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+# The correctness rules CI enforces (the core's and the platform's gate).
+select = ["F", "E9"]
