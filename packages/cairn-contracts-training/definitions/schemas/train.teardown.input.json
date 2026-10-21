@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://train.teardown.input/1.0.0",
+  "type": "object",
+  "properties": {
+    "output_name": {
+      "default": "",
+      "description": "Adapter name the managed train leg was launched with; matched against the registered job's stored spec.",
+      "title": "Output Name",
+      "type": "string"
+    },
+    "run_id": {
+      "default": "",
+      "description": "Exact run id of the managed train leg, when known. Wins over output_name; empty = match by output_name.",
+      "title": "Run Id",
+      "type": "string"
+    }
+  }
+}
