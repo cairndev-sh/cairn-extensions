@@ -1,0 +1,98 @@
+# cairn-operator-training — declarative manifest.
+# One SFT trainer: the `train.qlora` / `train.dpo` / `train.distill` flow stages run
+# wherever the profile's ml engine sends them (an ssh GPU box today); the `train.run`
+# operations are the deterministic stub and the CPU/MPS local trainer; `compress/distill`.
+# Evaluation, cost gates, promotion and registration are other packs' operations; a
+# pipeline composes them. The heavy GPU env is the `[gpu]` extra on the GPU box, never
+# the base wheel. Schema: cairn.core.pack.manifest.
+
+[pack]
+name        = "cairn-operator-training"
+version     = "0.1.0"
+type        = "operator"
+description = "One SFT trainer: Unsloth QLoRA/LoRA as flow stages an engine runs on a GPU box, plus the stub and CPU/MPS local trainers."
+kind        = "operator"
+publisher   = "cairn"
+trust_level = "official"
+
+[compat]
+cairn_engine = ">=0.1.5,<0.2"
+
+# Deterministic default + test/dev fallback. No spend, no GPU.
+[operator."train/stub"]
+version       = "0.1.0"
+implements    = ["contract://train.run/1.0.0"]
+input_schema  = "TrainSpec"
+output_schema = "TrainResult"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = true
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."train/stub".capabilities]
+provides = ["train.run"]
+
+# train/local — REAL LoRA SFT on CPU / Apple-MPS (no GPU). The honest "GPU mock":
+# actually trains a (small) model → real loss + real adapter, runs anywhere in
+# seconds. Plain LoRA via transformers+peft+trl ([local] extra); no bitsandbytes
+# /unsloth (CUDA-only). Adapter saved to file://<dir>.
+[operator."train/local"]
+version       = "0.1.0"
+implements    = ["contract://train.run/1.0.0"]
+input_schema  = "TrainSpec"
+output_schema = "TrainResult"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = true
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."train/local".capabilities]
+provides = ["train.run"]
+
+# compress/distill — knowledge distillation via trl's GKDTrainer (#1726,
+# revives the parked #467). A small STUDENT learns from a larger TEACHER; the
+# quality gate is eval/delta, which already calls itself "the gate that unlocks
+# the compression lane (quantize / distill / prune)".
+#
+# In THIS pack rather than cairn-operator-compress because it reuses train_entry's
+# adapter-save / MLflow / checkpoint-relay helpers, and cross-operator-pack
+# imports are not allowed. The capability is compression, so the name is
+# compress/* — the same split cairn-operator-eval uses for model/* and rag/*.
+[operator."compress/distill"]
+version       = "0.1.0"
+input_schema  = "DistillSpec"
+output_schema = "DistillResult"
+long_running       = true
+requires_gpu       = true
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = true
+risk      = "paid_compute"
+executors = ["in_process"]
+
+[operator."compress/distill".capabilities]
+provides = ["compress.distill"]
+
+[operator."compress/distill".reports]
+stages  = ["download", "train", "export"]
+
+# ADR-0103 / #2025 — what each trainer REPORTS (stages · series · scalars);
+# generated from the classes by cairn.core.operator.manifest_sync and held
+# honest by tests/core/test_operator_manifest_sync.py + test_pack_manifest_drift.py.
+
+[operator."train/stub".reports]
+stages  = ["download", "tokenise", "train", "eval", "export"]
+series  = [{ name = "loss", unit = "nats" }, { name = "eval_loss", unit = "nats" }, { name = "learning_rate", unit = "" }, { name = "grad_norm", unit = "" }, { name = "epoch", unit = "" }, { name = "tokens_per_s", unit = "tok/s" }, { name = "gpu_util_pct", unit = "%" }, { name = "gpu_mem_gb", unit = "GiB" }, { name = "gpu_mem_total_gb", unit = "GiB" }, { name = "gpu_temp_c", unit = "°C" }, { name = "gpu_power_w", unit = "W" }, { name = "cpu_pct", unit = "%" }, { name = "ram_gb", unit = "GB" }]
+scalars = ["final_loss", "best_eval_loss", "tokens_seen", "steps", "train_runtime_s"]
+
+[operator."train/local".reports]
+stages  = ["download", "tokenise", "train", "eval", "export"]
+series  = [{ name = "loss", unit = "nats" }, { name = "eval_loss", unit = "nats" }, { name = "learning_rate", unit = "" }, { name = "grad_norm", unit = "" }, { name = "epoch", unit = "" }, { name = "tokens_per_s", unit = "tok/s" }, { name = "gpu_util_pct", unit = "%" }, { name = "gpu_mem_gb", unit = "GiB" }, { name = "gpu_mem_total_gb", unit = "GiB" }, { name = "gpu_temp_c", unit = "°C" }, { name = "gpu_power_w", unit = "W" }, { name = "cpu_pct", unit = "%" }, { name = "ram_gb", unit = "GB" }]
+scalars = ["final_loss", "best_eval_loss", "tokens_seen", "steps", "train_runtime_s"]
+
