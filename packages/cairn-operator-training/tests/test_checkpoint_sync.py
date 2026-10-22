@@ -5,7 +5,6 @@ pull-before-resume. Hermetic — moto mocks S3, no real network, no torch stack
 """
 from __future__ import annotations
 
-import os
 
 import boto3
 import pytest

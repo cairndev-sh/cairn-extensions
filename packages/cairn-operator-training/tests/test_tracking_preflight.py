@@ -19,7 +19,6 @@ from __future__ import annotations
 import sys
 import types
 
-import pytest
 
 from operator_training.train_entry import _preflight_mlflow, _tracking_setup
 

@@ -234,7 +234,7 @@ def _adapter_on_disk(tmp_path, name="t-adapter"):
 
 def test_flow_path_s3_run_ends_with_an_s3_adapter_uri(tmp_path, monkeypatch):
     """THE regression pin from #1715: today it ends with /tmp/."""
-    from operator_training import checkpoint_sync, flow_stages as fs
+    from operator_training import flow_stages as fs
 
     adapter = _adapter_on_disk(tmp_path)
     monkeypatch.setattr(fs, "publish_adapter_dir",

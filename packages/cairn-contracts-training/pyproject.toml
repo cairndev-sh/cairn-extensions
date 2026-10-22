@@ -10,6 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 license = { text = "Apache-2.0" }
+# The core's contract resolver admits only cairn_contracts/<name>/ and files directly in
+# *.dist-info/ (a data-only wheel); a license file would land in *.dist-info/licenses/.
+# LICENSE and NOTICE stay in this directory and the sdist.
+license-files = []
 authors = [{name = "cairn maintainers"}]
 
 [project.urls]
