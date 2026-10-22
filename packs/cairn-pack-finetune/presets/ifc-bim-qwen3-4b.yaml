@@ -1,0 +1,31 @@
+# presets/ifc-bim-qwen3-4b.yaml — Qwen3-4B-Base, 4-bit QLoRA, on the IFC/BIM versions
+# dataset-prep's `ifc-bim-alpaca` preset registers (cairn-extensions#7).
+#
+#     cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b -e finetune-ssh --watch
+#
+# `@latest` resolves when the run launches and is recorded on the run as the version number it
+# resolved to; pin a number (`@1`) to rerun against the same versions on purpose.
+pipeline: finetune/sft
+presets:
+  - name: ifc-bim-qwen3-4b
+    description: >
+      Qwen/Qwen3-4B-Base with 4-bit QLoRA (r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407,
+      one epoch) on ifc-bim-alpaca's train version, validated on its val version.
+    inputs:
+      train_version: "dataset:ifc-bim-alpaca-train@latest"
+      val_version: "dataset:ifc-bim-alpaca-val@latest"
+      test_version: "dataset:ifc-bim-alpaca-test@latest"
+      base_model: Qwen/Qwen3-4B-Base
+      method: qlora
+      output_name: ifc-bim-qwen3-4b
+      tag: ifc-bim-qwen3-4b@candidate
+      lora_r: 16
+      lora_alpha: 32
+      lora_dropout: 0.0
+      learning_rate: 0.0002
+      max_seq_len: 2048
+      seed: 3407
+      epochs: 1.0
+      per_device_batch_size: 2
+      gradient_accumulation_steps: 8
+      gradient_checkpointing: true

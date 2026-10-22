@@ -1,0 +1,73 @@
+# flows/sft-train.yaml — one supervised fine-tune as a governed ml leg (cairn-extensions#7).
+# Every stage is a kernel of cairn-operator-training; the profile's ml engine decides where the
+# leg runs (an ssh GPU box through `ml_target`), never this file.
+#
+#   sample.fidelity → train.qlora → eval.checkpoints → package.adapter
+#
+# The data is prepared versions only (dataset-prep/prepare): `train_uri`, `eval_uri` and
+# `test_uri` arrive as registered `dataset:` refs, which the control plane resolves to their
+# location pinned by hash and the trainer verifies before the model loads. `test_uri` is
+# recorded on the result and never opened by the trainer.
+#
+# `$config.<key>` with no value is omitted, so the kernel default applies.
+
+name: sft-train
+kind: ml
+description: >
+  Fine-tune with LoRA or 4-bit QLoRA on prepared train / val versions: an optional recorded
+  subsample, the base model's validation loss before the first step, training, a fail-fast
+  checkpoint check, and the packaged candidate adapter.
+
+stages:
+  # A deterministic, recorded subsample of the train version (the smoke run); a no-op when
+  # no fidelity is set.
+  - stage: sample.fidelity
+    config:
+      dataset_uri: $config.train_uri
+      fidelity_rows: $config.fidelity_rows
+      fidelity_seed: $config.seed
+    resources:
+      gpu: 0
+      cpu: 1
+  - stage: train.qlora
+    config:
+      train_uri: $config.train_uri
+      eval_uri: $config.eval_uri
+      test_uri: $config.test_uri
+      baseline_eval: $config.baseline_eval
+      base_model: $config.base_model
+      method: $config.method
+      output_name: $config.output_name
+      max_steps: $config.max_steps
+      epochs: $config.epochs
+      learning_rate: $config.learning_rate
+      lora_r: $config.lora_r
+      lora_alpha: $config.lora_alpha
+      lora_dropout: $config.lora_dropout
+      target_modules: $config.target_modules
+      max_seq_len: $config.max_seq_len
+      seed: $config.seed
+      per_device_batch_size: $config.per_device_batch_size
+      gradient_accumulation_steps: $config.gradient_accumulation_steps
+      gradient_checkpointing: $config.gradient_checkpointing
+      packing: $config.packing
+      eval_steps: $config.eval_steps
+      save_steps: $config.save_steps
+      save_total_limit: $config.save_total_limit
+      report_to: $config.report_to
+      tracking_project: $config.tracking_project
+      tracking_run_name: $config.tracking_run_name
+      artifact_target: $config.artifact_target
+      registered_model_name: $config.registered_model_name
+      stub: $config.stub
+    resources:
+      gpu: 1
+  - stage: eval.checkpoints
+    config:
+      max_eval_loss: $config.max_eval_loss
+  - stage: package.adapter
+    config:
+      base_model: $config.base_model
+    resources:
+      gpu: 0
+      cpu: 2

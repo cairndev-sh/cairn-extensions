@@ -1,0 +1,23 @@
+# profiles/finetune-ssh.toml — run the `sft` pipeline's ml legs on an ssh GPU box
+# (cairn-extensions#7).
+#
+#     export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"     # in the engine's environment
+#     cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
+#         --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
+#     export CAIRN_PROFILE=<this file>
+#
+# The box installs `cairn-operator-training[gpu]` (torch, unsloth, trl, peft, transformers,
+# bitsandbytes, pinned); the control plane installs `cairn-pack-finetune` only. Nothing here
+# turns on S3 or MLflow: they come from the environment when it sets them —
+# CAIRN_CHECKPOINT_BUCKET (checkpoints and `artifact_target: s3`), CAIRN_ARTIFACT_STORE=s3 with
+# CAIRN_ARTIFACT_S3_BUCKET (registered files a remote box writes), and MLFLOW_TRACKING_URI
+# (`report_to: [mlflow]`). Unset, the run keeps everything local.
+
+[profile]
+visibility = "public"
+
+[profile.backends]
+dataflow_engine = "builtin"   # dataset-prep/prepare's data leg, on the control plane's box
+ml_engine       = "builtin"   # the sft-train flow, dispatched to ml_target
+ml_target       = "gpu"       # the compute.ssh connection named `gpu`
+artifact_store  = "local"
