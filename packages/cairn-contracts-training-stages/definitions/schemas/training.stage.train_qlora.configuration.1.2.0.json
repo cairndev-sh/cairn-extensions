@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.train_qlora.configuration/1.2.0",
+  "type": "object",
+  "properties": {
+    "artifact_target": {
+      "default": "hf",
+      "description": "Adapter destination.",
+      "enum": [
+        "hf",
+        "local",
+        "s3"
+      ],
+      "title": "Artifact Target",
+      "type": "string"
+    },
+    "base_model": {
+      "default": "Qwen/Qwen2.5-3B-Instruct",
+      "description": "HF model id of the base to fine-tune (Apache-2.0 default).",
+      "title": "Base Model",
+      "type": "string"
+    },
+    "beta": {
+      "default": 0.1,
+      "description": "DPO beta (preference-loss strength vs the reference model).",
+      "exclusiveMinimum": 0,
+      "title": "Beta",
+      "type": "number"
+    },
+    "compute_connection": {
+      "default": "",
+      "description": "Name of the compute.<provider> connection this managed job runs on (e.g. the `cairn connect runpod` connection). Empty = the dispatch-bound compute target, if any.",
+      "title": "Compute Connection",
+      "type": "string"
+    },
+    "dataset_uri": {
+      "description": "Dataset of (input,output) pairs: local path, HF Hub id, or artifact uri.",
+      "title": "Dataset Uri",
+      "type": "string"
+    },
+    "epochs": {
+      "default": 1.0,
+      "minimum": 0,
+      "title": "Epochs",
+      "type": "number"
+    },
+    "eval_split": {
+      "default": 0.1,
+      "description": "Fraction held out for mid-training eval.",
+      "exclusiveMaximum": 1,
+      "minimum": 0,
+      "title": "Eval Split",
+      "type": "number"
+    },
+    "eval_steps": {
+      "default": 50,
+      "description": "Evaluate every N steps (0 = epoch-end).",
+      "minimum": 0,
+      "title": "Eval Steps",
+      "type": "integer"
+    },
+    "eval_uri": {
+      "default": "",
+      "description": "A governed validation split. When set the trainer evaluates on it and eval_split is not used.",
+      "title": "Eval Uri",
+      "type": "string"
+    },
+    "gpu": {
+      "default": "T4",
+      "description": "GPU type for the backend (T4, A10G, A100, …).",
+      "title": "Gpu",
+      "type": "string"
+    },
+    "gradient_accumulation_steps": {
+      "default": 0,
+      "description": "Steps accumulated before an optimizer step; 0 keeps the trainer's default.",
+      "minimum": 0,
+      "title": "Gradient Accumulation Steps",
+      "type": "integer"
+    },
+    "gradient_checkpointing": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Trade compute for activation memory; null keeps the trainer's default.",
+      "title": "Gradient Checkpointing"
+    },
+    "hf_repo": {
+      "default": "",
+      "description": "HF Hub repo id (user/name) for artifact_target=hf; defaults from output_name.",
+      "title": "Hf Repo",
+      "type": "string"
+    },
+    "ignore_ram_check": {
+      "type": [
+        "boolean",
+        "string"
+      ],
+      "description": "Real-trainer path only: skip the host-RAM feasibility refusal (#1322). Not a TrainSpec field."
+    },
+    "init_adapter_uri": {
+      "default": "",
+      "description": "Adapter to CONTINUE training from: s3://…/adapter/ or a local dir with adapter_config.json. Empty = fresh adapter. Overrides lora_r/alpha/target_modules (the loaded adapter_config wins).",
+      "title": "Init Adapter Uri",
+      "type": "string"
+    },
+    "learning_rate": {
+      "default": 0.0002,
+      "exclusiveMinimum": 0,
+      "title": "Learning Rate",
+      "type": "number"
+    },
+    "lora_alpha": {
+      "default": 16,
+      "exclusiveMinimum": 0,
+      "title": "Lora Alpha",
+      "type": "integer"
+    },
+    "lora_dropout": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LoRA dropout; null keeps the trainer's default.",
+      "title": "Lora Dropout"
+    },
+    "lora_r": {
+      "default": 16,
+      "exclusiveMinimum": 0,
+      "title": "Lora R",
+      "type": "integer"
+    },
+    "max_seq_len": {
+      "default": 2048,
+      "exclusiveMinimum": 0,
+      "title": "Max Seq Len",
+      "type": "integer"
+    },
+    "max_steps": {
+      "default": 0,
+      "description": "If >0, cap steps (overrides epochs).",
+      "title": "Max Steps",
+      "type": "integer"
+    },
+    "method": {
+      "default": "qlora",
+      "description": "PEFT method.",
+      "enum": [
+        "qlora",
+        "lora"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "output_name": {
+      "default": "adapter",
+      "description": "Name for the produced LoRA adapter.",
+      "title": "Output Name",
+      "type": "string"
+    },
+    "packing": {
+      "default": true,
+      "description": "Pack multiple short sequences per step for predictable VRAM use.",
+      "title": "Packing",
+      "type": "boolean"
+    },
+    "per_device_batch_size": {
+      "default": 0,
+      "description": "Rows per device per step; 0 keeps the trainer's default.",
+      "minimum": 0,
+      "title": "Per Device Batch Size",
+      "type": "integer"
+    },
+    "registered_model_name": {
+      "default": "",
+      "description": "If set and MLflow is reporting, register the trained adapter as a new version of this MLflow Registered Model (runs:/<run>/adapter). Empty = no registration.",
+      "title": "Registered Model Name",
+      "type": "string"
+    },
+    "report_to": {
+      "description": "Experiment trackers: mlflow and/or wandb. The kernel also accepts a comma-separated string (a leftover from pre-#1675 plans, which stringified `with:` lists), so a string is accepted beside the list.",
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "mlflow",
+              "wandb"
+            ],
+            "type": "string"
+          },
+          "title": "Report To",
+          "type": "array"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "save_steps": {
+      "default": 50,
+      "description": "Checkpoint every N steps; resume_from_checkpoint on restart.",
+      "minimum": 0,
+      "title": "Save Steps",
+      "type": "integer"
+    },
+    "save_total_limit": {
+      "default": 2,
+      "description": "Keep only the N most-recent checkpoints (0 = unbounded).",
+      "minimum": 0,
+      "title": "Save Total Limit",
+      "type": "integer"
+    },
+    "seed": {
+      "default": 42,
+      "description": "Split/training seed for reproducibility.",
+      "title": "Seed",
+      "type": "integer"
+    },
+    "stub": {
+      "type": [
+        "boolean",
+        "string"
+      ],
+      "description": "Select the hermetic StubTrainOp (no torch, no spend); CAIRN_TRAIN_STUB is the env equivalent."
+    },
+    "target_modules": {
+      "description": "LoRA target modules. The shipped pipelines pass this as a comma-separated string (`{type: str, default: \"\"}`, empty = the trainer's default) and the kernel splits it (flow_stages.py `_spec_from_config`), so a string is accepted beside the list.",
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Modules",
+          "type": "array"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "test_uri": {
+      "default": "",
+      "description": "The held-out test split. Recorded on the result; the trainer never opens it.",
+      "title": "Test Uri",
+      "type": "string"
+    },
+    "tracking_project": {
+      "default": "",
+      "description": "MLflow experiment / W&B project name (defaults from output_name).",
+      "title": "Tracking Project",
+      "type": "string"
+    },
+    "tracking_run_name": {
+      "default": "",
+      "description": "Tracking run name (defaults from output_name).",
+      "title": "Tracking Run Name",
+      "type": "string"
+    },
+    "train_uri": {
+      "default": "",
+      "description": "A governed train split (a registered dataset version's URI). When set it is the training data, in place of dataset_uri.",
+      "title": "Train Uri",
+      "type": "string"
+    },
+    "validate_pipeline": {
+      "default": false,
+      "description": "Validate the whole pipeline on CPU (tiny model, throttled) before GPU.",
+      "title": "Validate Pipeline",
+      "type": "boolean"
+    },
+    "baseline_eval": {
+      "type": "boolean",
+      "default": false,
+      "description": "Evaluate once before the first step on the evaluation data and report baseline_eval_loss: the base model's loss, since a fresh LoRA adapter is a no-op. Skipped on a resumed run."
+    }
+  },
+  "additionalProperties": false
+}

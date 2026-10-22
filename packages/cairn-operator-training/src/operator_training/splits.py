@@ -56,6 +56,23 @@ def batch_args(spec: Any, *, per_device: int, accumulation: int) -> dict[str, in
     }
 
 
+def baseline(spec: Any, evaluate: Callable[[], dict], *, has_eval: bool, resumed: bool) -> dict[str, Any]:
+    """cairn-extensions#7 — with ``baseline_eval``, the evaluation loss BEFORE the first step.
+
+    A fresh LoRA adapter starts as a no-op (its B matrix is zero), so this is the base model's
+    loss on the evaluation data: the number the candidate's final ``eval_loss`` is compared with.
+    Skipped, and the reason recorded, when there is no evaluation data or the run resumed from a
+    checkpoint (it would measure a half-trained adapter, not the base model). Call it after the
+    trainer is built and before ``train()``."""
+    if not _get(spec, "baseline_eval", False):
+        return {}
+    if not has_eval:
+        return {"baseline_skipped": "no evaluation data"}
+    if resumed:
+        return {"baseline_skipped": "resumed from a checkpoint"}
+    return {"baseline_eval_loss": float(evaluate().get("eval_loss", 0.0))}
+
+
 def recorded(spec: Any, batch: dict[str, int], eval_source: str) -> dict[str, Any]:
     """The scalars a run records about its data and batch."""
     out: dict[str, Any] = {
@@ -68,4 +85,4 @@ def recorded(spec: Any, batch: dict[str, int], eval_source: str) -> dict[str, An
     return out
 
 
-__all__ = ["batch_args", "recorded", "train_and_eval", "train_source"]
+__all__ = ["baseline", "batch_args", "recorded", "train_and_eval", "train_source"]

@@ -350,6 +350,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
         trainer = _mk(processing_class=tok)
     except TypeError:  # older trl
         trainer = _mk(tokenizer=tok)
+    _baseline = splits.baseline(spec, trainer.evaluate, has_eval=eval_ds is not None, resumed=False)
     stats = trainer.train()
     _stage(reporter, "export")
     trainer.save_model(out_dir)
@@ -357,6 +358,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
 
     metrics = _base_metrics(stats, device, steps)
     metrics.update(splits.recorded(spec, _batch, _eval_source))
+    metrics.update(_baseline)
     if tracking_error:
         metrics["tracking_error"] = tracking_error  # soft, like publish_error (#1709)
     if validating:

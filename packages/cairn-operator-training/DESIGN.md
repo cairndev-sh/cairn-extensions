@@ -120,6 +120,7 @@ governed splits and the trainer knobs, and drops `extra`:
 | `gradient_accumulation_steps` | `0` | 0 keeps the default (1) |
 | `gradient_checkpointing` | `null` | null keeps the default (Unsloth's on the GPU path) |
 | `lora_dropout` | `null` | null keeps the default (0 on the GPU path, 0.05 on CPU/MPS) |
+| `baseline_eval` | `false` | 1.2.0 (cairn-extensions#7): evaluate once before the first step and report `baseline_eval_loss` — the base model's loss on the evaluation data, since a fresh LoRA adapter is a no-op; `baseline_skipped` names why when there is no evaluation data or the run resumed |
 
 Both trainers read them through `splits.py`, and record `effective_batch_size`, `eval_source` (`eval_uri`,
 `eval_split` or `none`) and `test_uri` on the result. A fidelity subsample replaces `train_uri` when the split is

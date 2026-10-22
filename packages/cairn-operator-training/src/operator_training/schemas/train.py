@@ -53,6 +53,10 @@ class TrainSpec(BaseModel):
     gradient_accumulation_steps: int = Field(0, ge=0, description="Steps accumulated before an optimizer step; 0 keeps the trainer's default.")
     gradient_checkpointing: Optional[bool] = Field(None, description="Trade compute for activation memory; None keeps the trainer's default.")
     lora_dropout: Optional[float] = Field(None, ge=0, le=1, description="LoRA dropout; None keeps the trainer's default.")
+    # cairn-extensions#7 (training.stage.train_qlora/1.2.0): the base model's loss on the evaluation
+    # data, measured once before the first step, so a run compares its candidate with the model it
+    # started from on the same rows.
+    baseline_eval: bool = Field(False, description="Evaluate once before training and report baseline_eval_loss.")
     seed: int = Field(42, description="Split/training seed for reproducibility.")
 
     #: Pipeline-validation mode (#536): run the ENTIRE training path on CPU with a

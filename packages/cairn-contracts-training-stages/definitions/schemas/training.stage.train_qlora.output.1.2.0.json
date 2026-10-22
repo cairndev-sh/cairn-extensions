@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.train_qlora.output/1.2.0",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "The trainer's terminal status; `succeeded` here (a failure raises)."
+    },
+    "backend": {
+      "type": "string",
+      "description": "Which trainer ran (stub, local, …)."
+    },
+    "adapter_uri": {
+      "type": "string",
+      "description": "The canonical adapter URI — the published one when artifact_target publishes (#1715)."
+    },
+    "local_adapter_dir": {
+      "type": "string",
+      "description": "The adapter directory on this box, for debugging; may equal adapter_uri."
+    },
+    "train_loss": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Final training loss, when the trainer reports one."
+    },
+    "eval_loss": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Final evaluation loss, when the trainer reports one."
+    },
+    "steps": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Optimizer steps run, when reported."
+    },
+    "base_model": {
+      "type": "string",
+      "description": "The base model fine-tuned."
+    },
+    "method": {
+      "type": "string",
+      "description": "qlora | lora."
+    },
+    "baseline_eval_loss": {
+      "type": "number",
+      "description": "With baseline_eval: the evaluation loss before the first step."
+    },
+    "baseline_skipped": {
+      "type": "string",
+      "description": "With baseline_eval: why no baseline was measured (no evaluation data, or a resumed run)."
+    }
+  },
+  "required": [
+    "status",
+    "backend",
+    "adapter_uri",
+    "train_loss",
+    "eval_loss",
+    "steps"
+  ]
+}

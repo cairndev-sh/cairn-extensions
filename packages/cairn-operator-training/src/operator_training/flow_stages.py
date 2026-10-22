@@ -290,6 +290,8 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
         "steps": metrics.get("steps"),
         "base_model": spec.base_model,
         "method": spec.method,
+        # cairn-extensions#7 — present only with baseline_eval (the value, or why it was skipped).
+        **{k: metrics[k] for k in ("baseline_eval_loss", "baseline_skipped") if k in metrics},
     }
 
 
@@ -442,6 +444,8 @@ for _fn in (sample_fidelity, eval_checkpoints, package_adapter):
 # cairn-extensions#4 — train.qlora implements 1.1.0: the governed splits (train/eval/test URIs)
 # and the batch, accumulation, checkpointing and dropout knobs; `extra` is not configuration.
 train_qlora.implements = ("contract://training.stage.train_qlora/1.1.0",)
+# cairn-extensions#7 — 1.2.0 adds baseline_eval (the base model's eval loss before the first step).
+train_qlora.implements = ("contract://training.stage.train_qlora/1.2.0",)
 
 
 _ABSTAIN = "I don't know."

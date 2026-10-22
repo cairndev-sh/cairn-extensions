@@ -492,6 +492,8 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     resume = os.path.isdir(out_dir) and any(
         p.startswith("checkpoint-") for p in os.listdir(out_dir)
     )
+    _baseline = splits.baseline(spec, trainer.evaluate, has_eval=eval_ds is not None,
+                                resumed=bool(resume or _resumed_from))
     stats = trainer.train(resume_from_checkpoint=resume)
 
     _stage(reporter, "export")
@@ -501,6 +503,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
 
     metrics = _base_metrics(stats)
     metrics.update(splits.recorded(spec, _batch, _eval_source))
+    metrics.update(_baseline)
     if _resumed_from:
         # #1749 — a resumed run is NOT the same experiment as a fresh one, and
         # the difference used to be invisible in the record. A reader comparing
