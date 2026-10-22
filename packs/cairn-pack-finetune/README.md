@@ -52,7 +52,7 @@ cairn connect add ssh --name gpu --set host=<box> --set user=<user> --set known_
 export CAIRN_PROFILE=<site-packages>/cairn_pack_finetune/profiles/finetune-ssh.toml
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch   # once
 cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
-cairn remote advance <pipeline-id>                    # approve-run, then promote-model
+cairn remote advance <pipeline-id> approve-run        # then, after the run: promote-model
 ```
 
 Buckets and trackers are the environment's, never the pack's:
