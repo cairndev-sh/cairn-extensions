@@ -70,7 +70,10 @@ def baseline(spec: Any, evaluate: Callable[[], dict], *, has_eval: bool, resumed
         return {"baseline_skipped": "no evaluation data"}
     if resumed:
         return {"baseline_skipped": "resumed from a checkpoint"}
-    return {"baseline_eval_loss": float(evaluate().get("eval_loss", 0.0))}
+    loss = evaluate().get("eval_loss")
+    if not isinstance(loss, (int, float)):
+        return {"baseline_skipped": "the evaluation reported no eval_loss"}
+    return {"baseline_eval_loss": float(loss)}
 
 
 def recorded(spec: Any, batch: dict[str, int], eval_source: str) -> dict[str, Any]:

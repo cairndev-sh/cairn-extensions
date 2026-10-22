@@ -60,3 +60,8 @@ def test_the_stage_reports_the_baseline_under_its_1_2_0_contract(tmp_path):
     assert problems(_schema(stage["configuration"]), cfg, "configuration") == []
     without = train_qlora(tmp_path / "b", {**config, "baseline_eval": False}, [])
     assert "baseline_eval_loss" not in without
+
+
+def test_an_evaluation_without_a_loss_is_recorded_as_skipped_not_as_zero():
+    out = splits.baseline({"baseline_eval": True}, lambda: {"eval_runtime": 1.0}, has_eval=True, resumed=False)
+    assert out == {"baseline_skipped": "the evaluation reported no eval_loss"}

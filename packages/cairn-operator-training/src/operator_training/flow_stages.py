@@ -441,10 +441,9 @@ def package_adapter(workdir: Path, config: dict, inputs: list[str]) -> dict:
 # kernels in this module (train.distill, dataset.dpo_pairs, …) stay legacy until their slices.
 for _fn in (sample_fidelity, eval_checkpoints, package_adapter):
     _fn.implements = (f"contract://training.stage.{_fn.__name__}/1.0.0",)
-# cairn-extensions#4 — train.qlora implements 1.1.0: the governed splits (train/eval/test URIs)
-# and the batch, accumulation, checkpointing and dropout knobs; `extra` is not configuration.
-train_qlora.implements = ("contract://training.stage.train_qlora/1.1.0",)
-# cairn-extensions#7 — 1.2.0 adds baseline_eval (the base model's eval loss before the first step).
+# cairn-extensions#4 / #7 — train.qlora implements 1.2.0: the governed splits (train/eval/test URIs)
+# and the batch, accumulation, checkpointing and dropout knobs (1.1.0; `extra` is not
+# configuration), and baseline_eval, the base model's eval loss before the first step (1.2.0).
 train_qlora.implements = ("contract://training.stage.train_qlora/1.2.0",)
 
 

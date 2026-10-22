@@ -50,18 +50,22 @@ cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
 cairn remote advance <pipeline-id>                    # approve-run, then promote-model
 ```
 
-S3 and MLflow are the environment's, never the pack's:
-- `CAIRN_CHECKPOINT_BUCKET` mirrors checkpoints and backs `artifact_target: s3`.
-- `MLFLOW_TRACKING_URI` with `-i report_to='[mlflow]'` records the run.
+Buckets and trackers are the environment's, never the pack's:
+- **Over SSH, two machines need a store both can reach.** `finetune-ssh` selects the s3 artifact
+  store (`CAIRN_ARTIFACT_S3_BUCKET`), and the IFC preset publishes the adapter with
+  `artifact_target: s3` (`CAIRN_CHECKPOINT_BUCKET`, which also mirrors checkpoints).
+- **MLflow:** `MLFLOW_TRACKING_URI` with `-i report_to='[mlflow]'` records the run.
+- **On one machine** (the default profile, the local store), none of these is needed.
 
-Unset, everything stays local.
+**Give each new run its own `output_name`.** It is the adapter's directory on the box, and a run
+that finds checkpoints there resumes from them. The smoke run uses `smoke_output_name`.
 
 ## Presets and profiles
 
 | | |
 |---|---|
 | `presets/ifc-bim-qwen3-4b.yaml` | `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest` |
-| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`), local artifact store |
+| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`), the s3 artifact store |
 
 ## Support
 

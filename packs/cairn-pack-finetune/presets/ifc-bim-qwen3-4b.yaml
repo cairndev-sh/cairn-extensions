@@ -29,3 +29,6 @@ presets:
       per_device_batch_size: 2
       gradient_accumulation_steps: 8
       gradient_checkpointing: true
+      # The ml legs run on an ssh box: the adapter is published where the control plane can
+      # reach it (CAIRN_CHECKPOINT_BUCKET), not left on the box's disk.
+      artifact_target: s3

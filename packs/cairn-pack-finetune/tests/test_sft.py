@@ -140,3 +140,5 @@ def test_the_full_run_never_trains_on_a_subsample_and_always_measures_the_baseli
     assert train["baseline_eval"] is True and "baseline_eval" not in smoke
     for key in ("train_uri", "eval_uri", "test_uri", "base_model", "lora_r", "lora_alpha", "learning_rate"):
         assert smoke[key] == train[key]
+    # its own directory on the box, so the full run never resumes from the smoke run
+    assert smoke["output_name"] == "$input.smoke_output_name" and train["output_name"] == "$input.output_name"

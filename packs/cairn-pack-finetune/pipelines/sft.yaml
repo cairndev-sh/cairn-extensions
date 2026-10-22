@@ -41,7 +41,8 @@ inputs:
   base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
   accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
   method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}
-  output_name: {type: str, default: "sft-candidate", description: "The adapter's name."}
+  output_name: {type: str, default: "sft-candidate", description: "The adapter's name, and its directory on the box: a run that finds that directory's checkpoints resumes from them, so give each new run its own."}
+  smoke_output_name: {type: str, default: "sft-smoke", description: "The smoke run's adapter name (its own directory)."}
   tag: {type: str, default: "sft-adapter@candidate", description: "The governed tag promote points at the adapter."}
   epochs: {type: float, default: 1.0}
   max_steps: {type: int, default: 0, description: "Optimizer steps for the full run; 0 = run the epochs."}
@@ -64,7 +65,7 @@ inputs:
   smoke_steps: {type: int, default: 5, description: "Optimizer steps of the smoke run."}
   report_to: {type: list, default: [], description: "Experiment trackers, e.g. [mlflow]; the tracker URI comes from the environment."}
   tracking_project: {type: str, default: "sft"}
-  artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local, s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
+  artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local (the machine the ml leg ran on — on an ssh box, out of the control plane's reach), s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
 
@@ -97,7 +98,6 @@ steps:
       test_uri: $input.test_version
       base_model: $input.base_model
       method: $input.method
-      output_name: $input.output_name
       epochs: $input.epochs
       learning_rate: $input.learning_rate
       lora_r: $input.lora_r
@@ -119,10 +119,14 @@ steps:
       stub: $input.stub
       fidelity_rows: $input.smoke_rows
       max_steps: $input.smoke_steps
+      # Its own adapter directory on the box: the full run must never resume from the smoke
+      # run's checkpoints (it would skip the baseline and carry the smoke steps).
+      output_name: $input.smoke_output_name
 
   - gate: smoke-ok
     depends_on: [smoke]
-    predicate: steps.smoke.findings.train_qlora_status == 'succeeded'
+    # A failed trainer already fails the leg; this checks the path ended in a packaged adapter.
+    predicate: steps.smoke.findings.package_adapter_packaged == `true` && length(steps.smoke.findings.train_qlora_adapter_uri) > `0`
 
   # ── the full run, with the base model's validation loss as the baseline ───
   - id: train
@@ -132,6 +136,7 @@ steps:
     timeout: 12h
     with:
       <<: *run
+      output_name: $input.output_name
       fidelity_rows: 0
       max_steps: $input.max_steps
       baseline_eval: true
