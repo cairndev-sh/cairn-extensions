@@ -1,0 +1,392 @@
+# cairn-operator-dataset-checks — declarative manifest.
+# Dataset readiness: the `dataset/*` operations check a corpus (format, exact and near
+# duplicates, contamination against eval sets, PII, token profile, provenance) and, under a
+# gate, fix what they found (dedup/decontam apply, anonymize, a leakage-resistant split); the
+# `cairn.dataflow_stages` kernels are the same logic as the admission and cleaning chain an
+# engine runs. Every heavy dependency is an extra with an honest fallback. Schema:
+# cairn.core.pack.manifest.
+
+[pack]
+name        = "cairn-operator-dataset-checks"
+version     = "0.1.0"
+type        = "operator"
+description = "Deterministic readiness checks for fine-tuning datasets (format, dedup, …)."
+kind        = "operator"
+publisher   = "cairn"
+trust_level = "official"
+
+[compat]
+cairn_engine = ">=0.1.5,<0.2"
+
+[operator."dataset/format"]
+version       = "0.1.0"
+input_schema  = "FormatInput"
+output_schema = "FormatOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/format".capabilities]
+provides = ["dataset.format_check"]
+
+[operator."dataset/dedup"]
+version       = "0.2.0"
+input_schema  = "DedupInput"
+output_schema = "DedupOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/dedup".capabilities]
+provides = ["dataset.dedup"]
+
+# #991 (ADR-0076 D3) — the REMEDIATION half of dataset/dedup: drops the duplicate
+# rows the check flagged and writes a cleaned dataset. external_write (gated).
+[operator."dataset/dedup_apply"]
+version       = "0.1.0"
+input_schema  = "DedupApplyInput"
+output_schema = "DedupApplyOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/dedup_apply".capabilities]
+provides = ["dataset.dedup_apply"]
+
+[operator."dataset/pii_scan"]
+version       = "0.1.0"
+implements    = ["contract://dataset.pii_scan/1.0.0"]
+input_schema  = "PiiInput"
+output_schema = "PiiOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/pii_scan".capabilities]
+provides = ["dataset.pii_scan"]
+
+# ADR-0080 P1 (#1029) — the FUSED single-pass check: one streaming read emitting
+# format + dedup + profile + PII findings (full-corpus secrets + sampled NER), so
+# the readiness gate reads one data pass instead of four re-streams. Shardable tag
+# routes it to the cairn-data fast-check queue; it runs inline (no fan-out).
+[operator."dataset/scan_all"]
+version       = "0.1.0"
+input_schema  = "ScanAllInput"
+output_schema = "ScanAllOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/scan_all".capabilities]
+provides = ["dataset.scan_all"]
+
+[operator."dataset/decontam"]
+version       = "0.3.0"
+implements    = ["contract://dataset.decontam/1.0.0"]
+input_schema  = "DecontamInput"
+output_schema = "DecontamOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/decontam".capabilities]
+provides = ["dataset.decontam"]
+
+# #991 (ADR-0076 D3) — the REMEDIATION half of dataset/decontam: drops the
+# training rows that leak the eval set and writes a cleaned dataset. external_write.
+[operator."dataset/decontam_apply"]
+version       = "0.1.0"
+input_schema  = "DecontamApplyInput"
+output_schema = "DecontamApplyOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/decontam_apply".capabilities]
+provides = ["dataset.decontam_apply"]
+
+[operator."dataset/profile"]
+version       = "0.2.0"
+input_schema  = "ProfileInput"
+output_schema = "ProfileOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/profile".capabilities]
+provides = ["dataset.profile"]
+
+[operator."dataset/provenance"]
+version       = "0.1.0"
+implements    = ["contract://dataset.provenance/1.0.0"]
+input_schema  = "ProvenanceInput"
+output_schema = "ProvenanceOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/provenance".capabilities]
+provides = ["dataset.provenance"]
+
+# Deterministic verdict: findings → pass/warn/fail with cited reasons. The
+# engine gates here; the LLM synthesis step only narrates this output.
+[operator."dataset/gate"]
+version       = "0.1.0"
+implements    = ["contract://dataset.gate/1.0.0"]
+input_schema  = "GateInput"
+output_schema = "GateOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/gate".capabilities]
+provides = ["dataset.gate"]
+
+# #882 — the config-gated POST-SCRUB PII gate. Deterministic: turns prep's own
+# re-scan (post_scrub_pii_rows) + the env-owned `mode` knob into a verdict.
+[operator."dataset/prep_gate"]
+version       = "0.1.0"
+implements    = ["contract://dataset.prep_gate/1.0.0"]
+input_schema  = "PrepGateInput"
+output_schema = "PrepGateOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/prep_gate".capabilities]
+provides = ["dataset.prep_gate"]
+
+# #883 — HITL review of a dirty scrub. requires_approval=true → the durable
+# approval gate fires BEFORE this runs (the prep run pauses awaiting_approval)
+# when dataset/prep_gate routed here (mode=hitl AND residual PII).
+[operator."dataset/prep_review"]
+version       = "0.1.0"
+implements    = ["contract://dataset.prep_review/1.0.0"]
+input_schema  = "PrepReviewInput"
+output_schema = "PrepReviewOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = true
+risk             = "read_only"
+requires_approval = true
+executors = ["in_process"]
+
+[operator."dataset/prep_review".capabilities]
+provides = ["dataset.prep_review"]
+
+# Deterministic (input, output) sampler that feeds the eval/judge soft signal.
+[operator."dataset/sample"]
+version       = "0.1.0"
+implements    = ["contract://dataset.sample/1.0.0"]
+input_schema  = "SampleInput"
+output_schema = "SampleOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/sample".capabilities]
+provides = ["dataset.sample"]
+
+[operator."dataset/anonymize"]
+version       = "0.1.0"
+implements    = ["contract://dataset.anonymize/1.0.0"]
+input_schema  = "AnonymizeInput"
+output_schema = "AnonymizeOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/anonymize".capabilities]
+provides = ["dataset.anonymize"]
+
+# LLM-judge quality selection (#384): scores each example via the governed LLM
+# gateway (AlpaGasus / DEITA) and writes a curated dataset. Calls a paid model —
+# risk paid_compute; writes a new dataset file.
+[operator."dataset/curate"]
+version       = "0.1.0"
+input_schema  = "CurateInput"
+output_schema = "CurateOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "paid_compute"
+executors = ["in_process"]
+
+[operator."dataset/curate".capabilities]
+provides = ["dataset.curate"]
+
+# Deterministic, group-aware (+ optionally stratified) train/val[/test] split.
+[operator."dataset/split"]
+version       = "0.1.0"
+implements    = ["contract://dataset.split/1.0.0"]
+input_schema  = "SplitInput"
+output_schema = "SplitOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/split".capabilities]
+provides = ["dataset.split"]
+
+# ADR-0095 §2.3 (#1625) — rehearsal sampling: mixes rows from prior cycles'
+# governed dataset versions (#1466) into the new train slice at a governed
+# ratio, recording which source each row-group came from. Anti-forgetting as a
+# DATA operation (EWC/GEM stay rejected). external_write — it writes the mixed
+# dataset the next train leg consumes.
+[operator."dataset/replay"]
+version       = "0.1.0"
+implements    = ["contract://dataset.replay/1.0.0"]
+input_schema  = "ReplayInput"
+output_schema = "ReplayOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/replay".capabilities]
+provides = ["dataset.replay"]
+
+# ADR-0095 §1.2 (#1629) — the signal→rung projections. Pure operators over the
+# EXPORTED capture JSONL (D4: no store access from an operator; the export is
+# where the consent gate and the holdout split already ran). external_write —
+# each writes the dataset its rung consumes.
+[operator."dataset/capture_to_sft"]
+version       = "0.1.0"
+input_schema  = "CaptureToSftInput"
+output_schema = "CaptureToSftOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/capture_to_sft".capabilities]
+provides = ["dataset.capture_to_sft"]
+
+[operator."dataset/capture_to_pairs"]
+version       = "0.1.0"
+input_schema  = "CaptureToPairsInput"
+output_schema = "CaptureToPairsOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/capture_to_pairs".capabilities]
+provides = ["dataset.capture_to_pairs"]
+
+# NOT (prompt, completion, score) triples — GRPO scores its OWN rollouts, so a
+# captured score is context for a reward function, never a training reward. See
+# the operator docstring.
+[operator."dataset/capture_to_rewards"]
+version       = "0.1.0"
+input_schema  = "CaptureToRewardsInput"
+output_schema = "CaptureToRewardsOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."dataset/capture_to_rewards".capabilities]
+provides = ["dataset.capture_to_rewards"]
+
+
+# ─── dataset/publish_fingerprints ─────────────────────────────────────
+#
+# #1050 — the CONTROL-SIDE half of cross-batch dedup (ADR-0080 P2). `probe` asks
+# "seen these row hashes in an earlier batch?"; this publishes the index a future
+# probe reads. It cannot be a dataflow stage: the data plane's job box has no
+# database access (the gap found live), so the write happens control-side after
+# the engine returns the cleaned output.
+#
+# risk = read_only: it writes cairn's OWN index — no user data, no external
+# system, nothing to gate. Never raises; a missing store degrades to
+# published=0 + a `skipped` reason so losing the index cannot fail a run whose
+# remediation already succeeded.
+
+[operator."dataset/publish_fingerprints"]
+version       = "0.1.0"
+implements    = ["contract://dataset.publish_fingerprints/1.0.0"]
+input_schema  = "PublishFingerprintsInput"
+output_schema = "PublishFingerprintsOutput"
+long_running       = false
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."dataset/publish_fingerprints".capabilities]
+provides = ["dataset.publish_fingerprints"]

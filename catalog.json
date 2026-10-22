@@ -4,6 +4,67 @@
   "generated_from": "cairn-extensions packs (do not edit by hand)",
   "entries": [
     {
+      "ref": "cairn-operator-dataset-checks",
+      "kind": "operator_pack",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "Deterministic readiness checks for fine-tuning datasets (format, dedup, …).",
+      "operators": [
+        "dataset/anonymize",
+        "dataset/capture_to_pairs",
+        "dataset/capture_to_rewards",
+        "dataset/capture_to_sft",
+        "dataset/curate",
+        "dataset/decontam",
+        "dataset/decontam_apply",
+        "dataset/dedup",
+        "dataset/dedup_apply",
+        "dataset/format",
+        "dataset/gate",
+        "dataset/pii_scan",
+        "dataset/prep_gate",
+        "dataset/prep_review",
+        "dataset/profile",
+        "dataset/provenance",
+        "dataset/publish_fingerprints",
+        "dataset/replay",
+        "dataset/sample",
+        "dataset/scan_all",
+        "dataset/split"
+      ],
+      "provides": [
+        "dataset.anonymize",
+        "dataset.capture_to_pairs",
+        "dataset.capture_to_rewards",
+        "dataset.capture_to_sft",
+        "dataset.curate",
+        "dataset.decontam",
+        "dataset.decontam_apply",
+        "dataset.dedup",
+        "dataset.dedup_apply",
+        "dataset.format_check",
+        "dataset.gate",
+        "dataset.pii_scan",
+        "dataset.prep_gate",
+        "dataset.prep_review",
+        "dataset.profile",
+        "dataset.provenance",
+        "dataset.publish_fingerprints",
+        "dataset.replay",
+        "dataset.sample",
+        "dataset.scan_all",
+        "dataset.split"
+      ],
+      "executors": [
+        "in_process"
+      ],
+      "gpu": false,
+      "install": {
+        "index": "pypi",
+        "name": "cairn-operator-dataset-checks"
+      }
+    },
+    {
       "ref": "cairn-operator-training",
       "kind": "operator_pack",
       "version": "0.1.0",
