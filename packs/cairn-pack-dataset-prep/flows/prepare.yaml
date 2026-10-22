@@ -1,15 +1,18 @@
 # flows/prepare.yaml — the stages of `dataset-prep/prepare`, one governed data leg
 # (cairn-extensions#16). Every stage is a kernel of cairn-operator-dataset-checks.
 #
-#   ingest (pinned) → exact dedup → near dedup → derived fields → prompt+response lengths
+#   ingest (pinned) → exact dedup → derived fields → near dedup → prompt+response lengths
 #     → field counts → export → group-aware split (registered with roles) → manifest
 #
 # Run values arrive as `$config.<key>`, bound from the pipeline leg's inputs; an unbound key
 # drops the entry, so the kernel's default applies.
 #
 # Order matters in three places:
-#   * `fields.derive` comes after dedup, so the derived fields cannot make two copies of one
-#     example look different, or two different examples look alike.
+#   * `dedup.near` comes after `fields.derive`, with the holdout door's shingles (5 words): the
+#     door compares every text field of the registered rows, the derived ones included, so near
+#     dedup must see exactly that text. Run on different text or shingles, pairs it kept as
+#     distinct cross the door's threshold between train and test, and the fine-tune launch is
+#     refused (found on the first full run of the IFC preset).
 #   * `export.jsonl` comes before `split`: the intake verdict the control plane stamps on every
 #     registered version reads the export's row count (ADR-0102 D1), and the split's three
 #     products are registered from this one leg (ADR-0141).
@@ -30,13 +33,15 @@ stages:
       # A Hub commit, tag or branch; a commit sha is the only pin that cannot move.
       revision: $config.revision
   - stage: dedup.exact
-  - stage: dedup.near
-    config:
-      threshold: $config.near_dup_threshold
   - stage: fields.derive
     config:
       # [{field, source, mode: extract | normalize, pattern, ...}]; none leaves the rows as read.
       rules: $config.derive
+  - stage: dedup.near
+    config:
+      threshold: $config.near_dup_threshold
+      # the holdout door's shingle size (cairn.core.holdout.DEFAULT_NGRAM)
+      ngram: 5
   - stage: profile.tokens
     config:
       # What a training sequence holds: prompt + response (the chat template aside).

@@ -45,6 +45,7 @@ def fake_hub(monkeypatch):
     monkeypatch.setattr(_io, "load_dataset", load_dataset)
     monkeypatch.setattr(_io, "load_dataset_builder", lambda source, **kw: _Builder())
     monkeypatch.setattr(_io, "hub_commit", lambda source, revision=None: f"sha-of-{revision}")
+    monkeypatch.setattr(_io, "hub_card_license", lambda source, revision=None: None)  # no card: the builder's
     return seen
 
 
@@ -182,3 +183,17 @@ def test_an_unpinned_hub_load_still_records_the_commit_it_got(fake_hub, monkeypa
     monkeypatch.setitem(_BY_REVISION, None, _BY_REVISION["v1"])
     out = _ingest(tmp_path, None)
     assert (out["revision"], out["revision_sha"]) == (None, "sha-of-None")
+
+
+def test_the_card_licence_wins_when_the_builder_reports_none(fake_hub, monkeypatch, tmp_path):
+    """Found on the IFC dataset: the card says apache-2.0, the builder info says ''."""
+    class _Empty:
+        class info:  # noqa: N801 - mirrors DatasetInfo's attribute shape
+            license = ""
+            citation = ""
+
+    monkeypatch.setattr(_io, "load_dataset_builder", lambda source, **kw: _Empty())
+    monkeypatch.setattr(_io, "hub_card_license", lambda source, revision=None: "apache-2.0")
+    _ingest(tmp_path, "v1")
+    manifest = json.loads(Path(dataset_manifest(tmp_path, {"store": "local"}, [])["output"]).read_text(encoding="utf-8"))
+    assert manifest["license"] == "apache-2.0"
