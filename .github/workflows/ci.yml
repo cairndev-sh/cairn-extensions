@@ -1,0 +1,59 @@
+# The extensions repository's CI (ADR-0128 D3 on GitHub Actions, as the core: ADR-0132 D8).
+# Every wheel is proven against the RELEASED cairndev its own pins select, never a checkout.
+name: ci
+'on':
+  push:
+    branches: [main]
+  pull_request: {}
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with:
+        version: 0.11.9
+    - name: Nothing private in the tree (imports, text, and the private tokens held in a secret)
+      env:
+        LEAK_SCAN_PRIVATE_TOKENS: ${{ secrets.LEAK_SCAN_PRIVATE_TOKENS }}
+        # a pull request from a fork gets no secrets: the check is required everywhere else
+        REQUIRE: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && '--require-private-tokens' || '' }}
+      run: python3 scripts/check_leaks.py $REQUIRE
+    - name: Lint (the correctness rules, pyproject.toml [tool.ruff.lint])
+      run: uvx ruff check .
+    - name: The policy scripts' own tests
+      run: uvx --python 3.13 --with pytest-asyncio pytest tests/test_check_leaks.py tests/test_check_venv.py tests/test_members.py -q -p no:cacheprovider
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with:
+        version: 0.11.9
+    - name: Every wheel on the released core
+      run: scripts/test_wheels.sh
+  package:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with:
+        version: 0.11.9
+    - name: Build every wheel
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        members="$(python3 scripts/members.py)"   # fails on a member that cannot build
+        for d in $members; do uv build -q "$d" -o dist; done
+        ls -l dist

@@ -1,0 +1,29 @@
+# Contributions are Apache-2.0 with a
+# DCO sign-off on every commit (ADR-0121 D7): this check refuses a pull request with a commit
+# that carries no `Signed-off-by:` line. Sign with `git commit -s`.
+name: dco
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            if ! git log -1 --format=%B "$c" | grep -qE '^Signed-off-by: .+ <[^>]+>$'; then
+              echo "::error::commit $c has no Signed-off-by line (git commit -s)"
+              missing=1
+            fi
+          done
+          exit "$missing"
