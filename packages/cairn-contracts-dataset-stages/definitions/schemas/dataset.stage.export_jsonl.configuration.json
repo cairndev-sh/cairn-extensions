@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.export_jsonl.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "name": {"type": "string", "default": "output.jsonl", "description": "File name of the export."},
+    "store": {"type": "string", "description": "local or s3; unset = the environment's artifact store."},
+    "root": {"type": "string", "description": "s3 key root override."},
+    "register": {"type": "string", "description": "Dataset-registry name the control plane versions the export under."}
+  },
+  "additionalProperties": false
+}

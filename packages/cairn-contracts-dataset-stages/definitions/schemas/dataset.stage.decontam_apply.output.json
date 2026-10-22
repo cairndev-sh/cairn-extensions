@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.decontam_apply.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {"type": "integer", "minimum": 0, "description": "Rows kept."},
+    "dropped": {"type": "integer", "minimum": 0, "description": "Contaminated rows dropped (read by intake)."},
+    "checked": {"type": "boolean", "description": "False when no eval set was compared (read by intake)."},
+    "method": {"type": "string", "description": "The method applied (read by intake)."},
+    "eval_sets": {"type": "string", "description": "Comma-joined eval sets actually compared (read by intake)."},
+    "backend": {"type": "string", "description": "The backend that ran."}
+  },
+  "required": ["rows", "dropped", "checked", "method", "eval_sets", "backend"]
+}

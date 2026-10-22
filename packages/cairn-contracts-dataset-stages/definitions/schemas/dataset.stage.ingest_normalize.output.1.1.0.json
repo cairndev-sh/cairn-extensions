@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.ingest_normalize.output/1.1.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows written to the working dataset."
+    },
+    "source": {
+      "type": "string",
+      "description": "What was read: the lineage parent."
+    },
+    "source_hash": {
+      "type": "string",
+      "description": "sha256 of the local bytes read, when the source is a local file."
+    },
+    "source_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size of the local bytes read."
+    },
+    "quarantined_rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Malformed source lines quarantined (#1008); the intake verdict reads it \u2014 any nonzero count is invalid_format (ADR-0102 D1, #2396)."
+    }
+  },
+  "required": [
+    "rows",
+    "source",
+    "quarantined_rows"
+  ]
+}

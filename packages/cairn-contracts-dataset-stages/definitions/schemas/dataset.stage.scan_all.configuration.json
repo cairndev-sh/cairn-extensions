@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.scan_all.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "description": "The corpus to scan; else the first input artifact, else the working dataset."},
+    "sample_size": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 1000, "description": "Reservoir-sample this many rows for the STATISTICAL tiers (format conformance, profile stats, NER density) — a valid go/no-go estimate that keeps the check O(1) in dataset size (#737). Dedup hashes, the format-detection vote, and the SECRET regex always scan every row. null = run the statistical tiers over the full corpus too."},
+    "target_trainers": {"items": {"type": "string"}, "type": "array", "description": "Trainers to report format compatibility for (dataset/format)."},
+    "expected_format": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "description": "Force a format instead of auto-detecting from the corpus vote."},
+    "normalize": {"default": true, "type": "boolean", "description": "Collapse whitespace before hashing so rows differing only in spacing count as duplicates (dataset/dedup)."},
+    "short_threshold": {"default": 10, "type": "integer", "description": "Responses shorter than this many chars are flagged short (dataset/profile)."},
+    "refusal_markers": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null, "description": "Case-insensitive refusal substrings (default set used if None)."},
+    "strict": {"default": false, "type": "boolean", "description": "Malformed-line handling (#1008): False quarantines bad JSONL lines to a side file and counts them; True fails fast."},
+    "engine": {"default": "python", "type": "string", "description": "Full-corpus pass engine: 'python' (one streaming read) | 'duckdb' (row count, dedup distinct-key, every-row secret scan and the reservoir sample as SQL — the format vote then comes from the sample). Fails loudly without the duckdb package."},
+    "backend": {"default": "auto", "type": "string", "description": "PII backend: 'auto' | 'regex' | 'regexset' | 'presidio' | 'cascade' (regex-in-presidio, ADR-0079) | 'duckdb' (the regex tier; sample density is scanned with the Python regex tier)."},
+    "text_fields": {"anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}], "default": null, "description": "Top-level field(s) holding training text to scan; null = auto free-text leaves (skip token/label lists, #1021 F4)."},
+    "preset": {"default": "governed", "enum": ["governed", "logs"], "type": "string", "description": "PII preset (governed = NER+regex+secrets; logs = regex+secrets)."},
+    "ner": {"anyOf": [{"type": "boolean"}, {"type": "null"}], "default": null, "description": "Detect names/locations with spaCy (null = preset value)."},
+    "model": {"anyOf": [{"enum": ["blank", "sm", "lg"], "type": "string"}, {"type": "null"}], "default": null, "description": "spaCy model powering NER (null = preset value)."},
+    "n_process": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "description": "CPU workers for the NER pass; 0 = all cores (null = preset)."},
+    "analyze_chunk": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "description": "Rows fed to the detector at once (null = preset value)."},
+    "secrets_full_scan": {"default": true, "type": "boolean", "description": "Scan every row for leaked secrets (ADR-0080 P1) and merge into the gate's blocking vocabulary even when NER density is sampled."},
+    "max_findings": {"default": 1000, "type": "integer", "description": "Cap the enumerated per-row PII/format `findings` lists (#891)."},
+    "ner_skip_below_conformant_pct": {"default": 40.0, "type": "number", "description": "Guard early-exit (ADR-0080 D2): when sampled format conformance is below this, the dataset already FAILs the format gate, so the CPU-heavy NER pass is skipped. Full-corpus secret scanning still runs (leaked keys still block), and only WARN-level sampled PII is skipped — never changes the verdict. 0 = never skip."}
+  },
+  "additionalProperties": false
+}

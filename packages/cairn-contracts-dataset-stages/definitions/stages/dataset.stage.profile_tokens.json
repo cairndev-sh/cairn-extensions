@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.profile_tokens",
+  "revision": "1.0.0",
+  "summary": "`profile.tokens` — Token-length profile of the working dataset and the over-length policy (count, drop or refuse).",
+  "configuration": "contract://dataset.stage.profile_tokens.configuration/1.0.0",
+  "output": "contract://dataset.stage.profile_tokens.output/1.0.0"
+}

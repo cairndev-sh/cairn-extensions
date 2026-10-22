@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.pii_redact.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {"type": "integer", "minimum": 0, "description": "Rows in the working dataset."},
+    "redacted_rows": {"type": "integer", "minimum": 0, "description": "Rows with at least one redaction (read by intake)."},
+    "pii_backend": {"type": "string", "description": "The backend that ran (read by intake)."}
+  },
+  "required": ["rows", "redacted_rows", "pii_backend"]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.scan_all.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "scanned": {"type": "integer", "description": "Rows read over the FULL corpus (dedup/secret tier)."},
+    "sampled": {"type": "boolean", "description": "True when the statistical tiers ran over a sample."},
+    "sample_size": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Rows in the statistical sample; None when the full corpus was scanned."},
+    "ner_skipped": {"type": "boolean", "description": "True when the guard early-exit skipped the NER pass (format already catastrophic); full-corpus secrets were still scanned."},
+    "quarantined_rows": {"type": "integer", "description": "Malformed source lines routed to quarantine instead of crashing (#1008)."},
+    "format_detected": {"type": "string", "description": "Winning format from the full-corpus vote."},
+    "format_conformant_pct": {"type": "number", "description": "Sampled conformance to the detected format."},
+    "dedup_total": {"type": "integer", "description": "Total rows read (full corpus)."},
+    "dedup_exact": {"type": "integer", "description": "Rows that are exact duplicates of an earlier row."},
+    "dedup_effective_size": {"type": "integer", "description": "Distinct rows after dedup."},
+    "dedup_pct": {"type": "number", "description": "exact_duplicates / total * 100, rounded."},
+    "profile_total": {"type": "integer", "description": "Rows in the profile sample."},
+    "profile_refusal_pct": {"type": "number", "description": "Refusal-marker hit ratio, rounded."},
+    "profile_short": {"type": "integer", "description": "Responses below short_threshold chars."},
+    "pii_backend": {"type": "string", "description": "The PII backend actually used."},
+    "pii_rows": {"type": "integer", "description": "Sampled rows with ≥1 PII/secret match."},
+    "pii_density": {"type": "number", "description": "pii_rows / sample * 100, rounded."},
+    "secret_rows": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Rows carrying a leaked secret over the FULL corpus; None when off."},
+    "findings_path": {"type": "string", "description": "The full findings payload (scan_findings.json), for the control-side hoist."}
+  },
+  "required": ["scanned", "sampled", "sample_size", "ner_skipped", "quarantined_rows", "format_detected", "format_conformant_pct", "dedup_total", "dedup_exact", "dedup_effective_size", "dedup_pct", "profile_total", "profile_refusal_pct", "profile_short", "pii_backend", "pii_rows", "pii_density", "secret_rows", "findings_path"]
+}

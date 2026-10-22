@@ -1,0 +1,33 @@
+# Shared STAGE contracts for the dataset kernels (#2242 V1-C, ADR-0118): DATA ONLY — no Python
+# package, no entry points, built like cairn-contracts-dataset. Its own distribution on purpose
+# (ADR-0118 Consequences): a core older than the `stage` kind refuses a distribution that carries
+# one, so the stage definitions never share a wheel with the capability contracts an older core
+# still reads. The root installs it NON-editable (`{ workspace = true, editable = false }`).
+[project]
+name = "cairn-contracts-dataset-stages"
+version = "1.1.0"
+description = "Shared stage contracts for the dataset readiness kernels (dataset.stage.*, cairn.stage/1, ADR-0118)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+license = { text = "Apache-2.0" }
+# The core's contract resolver admits only cairn_contracts/<name>/ and files directly in
+# *.dist-info/ (a data-only wheel); a license file would land in *.dist-info/licenses/.
+# LICENSE and NOTICE stay in this directory and the sdist.
+license-files = []
+authors = [{name = "cairn maintainers"}]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"definitions" = "cairn_contracts/cairn-contracts-dataset-stages"

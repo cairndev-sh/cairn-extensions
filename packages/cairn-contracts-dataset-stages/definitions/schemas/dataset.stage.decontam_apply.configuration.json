@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.decontam_apply.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "eval_path": {"type": ["string", "null"], "description": "One explicit eval set; wins over eval_paths."},
+    "eval_paths": {"anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}], "description": "Every golden/test version (filled control-side); a list or a comma string."},
+    "method": {"type": "string", "default": "exact", "description": "exact, ngram, both or minhash."},
+    "backend": {"type": "string", "default": "python", "description": "python or duckdb (exact only)."},
+    "normalize": {"type": "boolean", "default": true, "description": "Collapse whitespace and case first."},
+    "ngram": {"type": "integer", "default": 13, "description": "N-gram size."},
+    "overlap_threshold": {"type": "number", "default": 0.8, "description": "N-gram/MinHash overlap threshold."}
+  },
+  "additionalProperties": false
+}
