@@ -1121,8 +1121,8 @@ def _derive_rules(config: dict) -> list[dict]:
     import re  # noqa: PLC0415 - stage bodies keep their imports (D5)
 
     rules = config.get("rules") or []
-    if not isinstance(rules, list) or not rules:
-        raise ValueError("fields.derive needs `rules`: a list of {field, source, mode, pattern}")
+    if not isinstance(rules, list):
+        raise ValueError("fields.derive: `rules` is a list of {field, source, mode, pattern}")
     out, fields = [], set()
     for rule in rules:
         field, source = str(rule.get("field") or ""), str(rule.get("source") or "")
@@ -1151,11 +1151,14 @@ def fields_derive(workdir: Path, config: dict, inputs: list[str]) -> dict:
     match with ``replace`` (``#``) and collapses whitespace — a template family, so rows that
     differ only in numbers or names share one value. A rule never overwrites a field the row
     already has: the source data stays as it was, and a trainer that formats the Alpaca or chat
-    fields never sees the added ones. Stats are counts only."""
+    fields never sees the added ones. Stats are counts only. No rules (a pipeline that bound
+    none) leaves the working dataset as it is."""
     from operator_dataset_checks._io import JsonlWriter  # noqa: PLC0415 - data deps live in stage bodies (D5)
 
     rules = _derive_rules(config)
     src, tmp = _current(workdir), workdir / "derived.jsonl"
+    if not rules:
+        return {"rows": _sha256_lines(src)[2], "fields": []}
     matched = {r["field"]: 0 for r in rules}
     rows = 0
     with JsonlWriter(tmp) as writer, src.open(encoding="utf-8") as fh:
@@ -1192,13 +1195,11 @@ def profile_fields(workdir: Path, config: dict, inputs: list[str]) -> dict:
     each cut to ``value_chars``, default 64) and counts as two flat lists, the rest summed as
     ``other``. ``groups`` fields (e.g. a template family, whose values are prompt text) report
     sizes only — distinct groups, the largest, singletons, the median — never a value, so no
-    row content reaches the record."""
+    row content reaches the record. Neither set reports the row count only."""
     from collections import Counter  # noqa: PLC0415 - stage bodies keep their imports (D5)
 
     count_fields = [str(f) for f in (config.get("count") or [])]
     group_fields = [str(f) for f in (config.get("groups") or [])]
-    if not count_fields and not group_fields:
-        raise ValueError("profile.fields needs `count` or `groups` (a list of field names)")
     top, chars = int(config.get("top", 20)), int(config.get("value_chars", 64))
     counters = {f: Counter() for f in {*count_fields, *group_fields}}
     missing = dict.fromkeys(counters, 0)

@@ -66,7 +66,6 @@ def test_derive_labels_the_topic_and_the_template_family(tmp_path):
     ([{"field": "output", "source": "input", "pattern": "x"}], "never overwrites data"),
     ([{"field": "t", "source": "input", "pattern": "x"}, {"field": "t", "source": "output", "pattern": "y"}], "two rules write"),
     ([{"field": "t", "source": "input", "pattern": "x", "mode": "rewrite"}], "mode must be one of"),
-    ([], "needs `rules`"),
 ])
 def test_derive_refuses_a_rule_that_would_change_or_confuse_the_data(tmp_path, rules, message):
     with pytest.raises(ValueError, match=message):
@@ -84,9 +83,13 @@ def test_profile_counts_labels_and_reports_groups_by_size_only(tmp_path):
     assert problems(_contract("profile_fields", "1.0.0", "output"), stats, "o") == []
 
 
-def test_profile_needs_a_field(tmp_path):
-    with pytest.raises(ValueError, match="needs `count` or `groups`"):
-        profile_fields(_workdir(tmp_path), {}, [])
+def test_unconfigured_derive_and_profile_pass_through(tmp_path):
+    """A pipeline that binds no rules and no fields (a dataset with its own columns) still runs."""
+    wd = _workdir(tmp_path)
+    before = (wd / "current.jsonl").read_bytes()
+    assert fields_derive(wd, {}, []) == {"rows": 4, "fields": []}
+    assert (wd / "current.jsonl").read_bytes() == before
+    assert profile_fields(wd, {}, []) == {"rows": 4}
 
 
 def test_tokens_measure_the_whole_example_on_request(tmp_path):

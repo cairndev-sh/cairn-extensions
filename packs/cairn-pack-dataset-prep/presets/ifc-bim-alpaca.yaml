@@ -1,0 +1,46 @@
+# presets/ifc-bim-alpaca.yaml — the IFC/BIM Alpaca dataset, prepared for a Qwen3-4B QLoRA run
+# (cairn-extensions#16). `cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca`.
+#
+# The dataset has `instruction`, `input` and `output` only, and `instruction` is the same on
+# every row, so the topic and the template family are derived:
+#   * `topic` — the first building element the answer defines (IFCWALL, IFCSLAB, …), `other`
+#     when it defines none. A regular expression, not an IFC parser: the IFC validator
+#     (cairn-extensions#12) is where a real parse belongs.
+#   * `family` — the request with its numbers and quoted names replaced, so two requests that
+#     differ only in dimensions or names are one family, and the split keeps each family on one
+#     side.
+# The two fields are added to the rows; the trainer formats `instruction`, `input` and
+# `output` only.
+pipeline: dataset-prep/prepare
+presets:
+  - name: ifc-bim-alpaca
+    description: >
+      Dietmar2020/ifc-bim-high-quality-alpaca at a pinned commit, 90/5/5 by template family,
+      lengths with the Qwen3-4B-Base tokenizer against a 2048-token sequence.
+    inputs:
+      path: Dietmar2020/ifc-bim-high-quality-alpaca
+      # The Hub commit read on 2026-10-22. Move the pin deliberately: a new commit is new data.
+      revision: 08d61c3c082c063c1647c59aeef1cf1107db6474
+      register: ifc-bim-alpaca
+      seed: 3407
+      train_ratio: 0.9
+      val_ratio: 0.05
+      test_ratio: 0.05
+      group_by: family
+      derive:
+        - field: topic
+          source: output
+          mode: extract
+          pattern: '=\s*(IFC(?:WALL|SLAB|BEAM|COLUMN|DOOR|WINDOW|ROOF|STAIR|RAMP|RAILING|PLATE|MEMBER|FOOTING|PILE|COVERING|CURTAINWALL|SPACE|OPENINGELEMENT|BUILDINGELEMENTPROXY)\w*)\s*\('
+          default: other
+        - field: family
+          source: input
+          mode: normalize
+          pattern: "\\d+(?:\\.\\d+)?|'[^']*'|\"[^\"]*\""
+          replace: "#"
+          case: lower
+      topic_fields: [topic]
+      group_fields: [family]
+      base_model: Qwen/Qwen3-4B-Base
+      max_seq_len: 2048
+      over_length: count

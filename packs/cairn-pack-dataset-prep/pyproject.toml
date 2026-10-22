@@ -1,0 +1,55 @@
+# cairn-pack-dataset-prep — the dataset-prep domain pack as a data wheel (cairn-extensions#16).
+#
+# Discovered through the `cairn.packs` entry point declared here: `pip install
+# cairn-pack-dataset-prep` is all the engine needs. The wheel carries this directory under the
+# import name `cairn_pack_dataset_prep`: the manifest, the one-line shim the entry point
+# targets, and the declarative assets. No operator; every stage the flow names comes from
+# cairn-operator-dataset-checks. In a checkout, `CAIRN_PACK_PATH=packs/cairn-pack-dataset-prep`
+# loads the same directory as a dev pack.
+[project]
+name = "cairn-pack-dataset-prep"
+version = "0.1.0"
+description = "cairn domain pack: prepare a dataset once into registered train, val and test versions."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "cairn maintainers"}]
+dependencies = [
+    "cairndev>=0.1.5,<0.2",
+    # The kernels the flow names (ingest.normalize 1.2.0, fields.derive, profile.fields,
+    # profile.tokens 1.1.0, split 1.0.0 with export, dataset.manifest).
+    "cairn-operator-dataset-checks>=0.1,<0.2",
+]
+
+[project.optional-dependencies]
+# Near-duplicate dedup (dedup.near is an honest skip without it) and the tokenizer that counts
+# lengths with the base model's own vocabulary (whitespace words without it).
+all = ["cairn-operator-dataset-checks[minhash,tokenizers]>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[project.entry-points."cairn.packs"]
+dataset-prep = "cairn_pack_dataset_prep:pack"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"__init__.py" = "cairn_pack_dataset_prep/__init__.py"
+"pack.toml" = "cairn_pack_dataset_prep/pack.toml"
+"pipelines" = "cairn_pack_dataset_prep/pipelines"
+"flows" = "cairn_pack_dataset_prep/flows"
+"presets" = "cairn_pack_dataset_prep/presets"
+"data" = "cairn_pack_dataset_prep/data"
+
+[tool.hatch.build.targets.sdist]
+include = ["__init__.py", "pack.toml", "pipelines", "flows", "presets", "data", "tests", "README.md", "LICENSE",
+           "NOTICE", "pyproject.toml"]

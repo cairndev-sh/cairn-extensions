@@ -5,7 +5,6 @@
   "properties": {
     "rules": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "properties": {
@@ -61,11 +60,9 @@
           "pattern"
         ],
         "additionalProperties": false
-      }
+      },
+      "description": "The fields to add; none (or absent) leaves the working dataset as it is."
     }
   },
-  "required": [
-    "rules"
-  ],
   "additionalProperties": false
 }

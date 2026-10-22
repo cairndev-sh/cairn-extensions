@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Prompt+response length, derived fields and field counts** (cairn-extensions#16).
+  `profile.tokens` implements 1.1.0: `measure: example` counts prompt + response and reports
+  each side's p50/p95/max (`measure: response`, the default, is unchanged). New stage
+  `fields.derive` adds a field from a regular expression over another (`extract` or
+  `normalize`) and never overwrites one. New read-only stage `profile.fields` reports label
+  values and counts as flat lists and grouping fields by size only. Requires
+  `cairn-contracts-dataset-stages==1.4.0`.
+
 - **A pinned Hub revision and the bundled manifest** (cairn-extensions#5).
   `ingest.normalize` takes `revision` (stage contract 1.2.0: configuration 1.1.0, output 1.2.0)
   and records `revision` (Hub ids only), `revision_sha`, `fetched_at` and `snapshot_hash`, also

@@ -1,0 +1,69 @@
+# flows/prepare.yaml — the stages of `dataset-prep/prepare`, one governed data leg
+# (cairn-extensions#16). Every stage is a kernel of cairn-operator-dataset-checks.
+#
+#   ingest (pinned) → exact dedup → near dedup → derived fields → prompt+response lengths
+#     → field counts → export → group-aware split (registered with roles) → manifest
+#
+# Run values arrive as `$config.<key>`, bound from the pipeline leg's inputs; an unbound key
+# drops the entry, so the kernel's default applies.
+#
+# Order matters in three places:
+#   * `fields.derive` comes after dedup, so the derived fields cannot make two copies of one
+#     example look different, or two different examples look alike.
+#   * `export.jsonl` comes before `split`: the intake verdict the control plane stamps on every
+#     registered version reads the export's row count (ADR-0102 D1), and the split's three
+#     products are registered from this one leg (ADR-0141).
+#   * `dataset.manifest` comes last, so its parent is the leg's product and its
+#     `data_content_hash` is the cleaned corpus the split read.
+
+name: prepare
+kind: data
+description: >
+  Pin the source, drop exact and near duplicates, label topics and template families,
+  profile prompt+response lengths and field counts, export the cleaned corpus, split it by
+  group into train / val / test registered with their roles, and write the manifest.
+
+stages:
+  - stage: ingest.normalize
+    config:
+      path: $config.path
+      # A Hub commit, tag or branch; a commit sha is the only pin that cannot move.
+      revision: $config.revision
+  - stage: dedup.exact
+  - stage: dedup.near
+    config:
+      threshold: $config.near_dup_threshold
+  - stage: fields.derive
+    config:
+      # [{field, source, mode: extract | normalize, pattern, ...}]; none leaves the rows as read.
+      rules: $config.derive
+  - stage: profile.tokens
+    config:
+      # What a training sequence holds: prompt + response (the chat template aside).
+      measure: example
+      base_model: $config.base_model
+      max_seq_len: $config.max_seq_len
+      # count (default) | drop | refuse. Never truncate.
+      over_length: $config.over_length
+  - stage: profile.fields
+    config:
+      count: $config.topic_fields
+      groups: $config.group_fields
+  - stage: export.jsonl
+    config:
+      store: $config.store
+  - stage: split
+    config:
+      seed: $config.seed
+      train_ratio: $config.train_ratio
+      val_ratio: $config.val_ratio
+      test_ratio: $config.test_ratio
+      group_by: $config.group_by
+      # The streaming hash backend: the same corpus and seed give the same split on any box.
+      backend: hash
+      export: true
+      register: $config.register
+      store: $config.store
+  - stage: dataset.manifest
+    config:
+      store: $config.store

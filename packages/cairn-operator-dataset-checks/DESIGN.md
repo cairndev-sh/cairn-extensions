@@ -124,6 +124,17 @@ kernels here have to honour:
   its `data_content_hash` is the export's registry id (nothing enforces the order: placed
   before the export, the export's parent becomes the report). It reports `dataset_rows`, not `rows`, so
   the report's descriptor does not claim rows of its own.
+* **Lengths, topics and families for preparation (cairn-extensions#16).** `profile.tokens`
+  1.1.0 takes `measure: example`: prompt (`_prompt_text`: the turns before the last assistant
+  reply, Alpaca `instruction` + `input`, or `prompt`) plus response, which is what a training
+  sequence holds, and `max_seq_len` then applies to it; `response` (default) is 1.0.0.
+  `fields.derive` adds fields from a regular expression over another field — `extract` (the
+  first match, `other` when none: a topic) or `normalize` (matches replaced, whitespace
+  collapsed: a template family) — for a dataset with neither column; it runs after dedup so a
+  derived field cannot change what counts as a duplicate, and it refuses to overwrite a field
+  the rows carry. `profile.fields` (read-only) reports a label field's top values and counts as
+  two flat lists and a grouping field by size only, because a template family is prompt text.
+  Both pass through when a pipeline binds nothing.
 
 **Control-plane writes.** Two operators touch a database, and both do it lazily and
 control-side, because the data plane's job box has no credentials (ADR-0081 D3):
@@ -355,6 +366,7 @@ vacuously against an uninstalled copy: install the wheel before trusting them.
 | 2026-10 | `decontam`, `provenance`, `sample` and `gate` implement the shared `dataset.*` contracts (`cairn-contracts-dataset`); the `dedup.exact`, `dedup.near`, `pii.redact`, `decontam.apply` and `scan.all` kernels call the operators' sync bodies (`run_dedup_apply`, `run_anonymize`, `run_decontam_apply`, `run_scan_all`) with no event loop or stand-in context (M7a). `pii.redact` still ignores the env-governed `AnonymizeConfig.kinds` (pre-existing) | #2242 |
 | 2026-10 | The seven intake kernels here and `scan.all` implement `dataset.stage.<kernel>/1.0.0` stage contracts (`cairn-contracts-dataset-stages`): closed configurations, open outputs with required keys; `cairn doctor` reports a kernel the control plane cannot load (ADR-0118) | #2242, #2363 |
 | 2026-10 | `ingest.normalize` emits `quarantined_rows`, `export.jsonl` emits `rows` (one pass with the hash): the intake verdict's malformed-line and empty-export checks fire (ADR-0102 D1); stage contracts 1.1.0 require them | #2396 |
+| 2026-10 | `profile.tokens` 1.1.0 measures prompt + response on request; new `fields.derive` (topic labels, template families) and read-only `profile.fields` (label counts, group sizes) | cairn-extensions#16 |
 | 2026-10 | `ingest.normalize` 1.2.0 loads a Hub id at `revision` and records its commit, fetch time and snapshot hash; new `dataset.manifest` stage writes the bundled manifest (a report) | cairn-extensions#5 |
 | 2026-10 | `publish_fingerprints`, `anonymize`, `split`, `pii_scan`, `prep_gate` and `prep_review` implement the shared `dataset.*` contracts (`cairn-contracts-dataset` 1.1.0), so `clean`, `prep` and `decontaminate` reach no uncontracted operator or stage | #2242 |
 | 2026-10 | `dataset/fix_batch`, its on-box `cairn-dataset-fix` entrypoint and `_fix_pipeline` retired with the deprecated fix trio; `clean` is the remediation path | #2434, #2425 |

@@ -1,0 +1,28 @@
+# dataset-prep — turn a raw source into frozen, registered train / val / test dataset versions
+# a fine-tune can consume (cairn-extensions#16).
+#
+# A domain pack is DATA plus glue, never operators (ADR-0127 D2): this manifest, the `prepare`
+# pipeline (the runnable surface), the `prepare` flow it runs (the stages, all from
+# cairn-operator-dataset-checks), the presets (named input sets) and a small sample. Assets are
+# found by convention (`pipelines/`, `flows/`, `presets/`, `data/`), so there is no `[assets]`.
+#
+# Preparing once and training many times keeps a held-out claim honest: the baseline, the
+# validation and the one-time test comparison read the same versions, and the holdout door
+# refuses a training run that would meet the `test` version. The fine-tune pack accepts these
+# versions only (cairn-pack-finetune, cairn-extensions#7).
+
+[pack]
+name        = "dataset-prep"
+version     = "0.1.0"
+description = "Prepare a dataset once: pin the source, audit it, split it by group and register train, val and test versions with their roles."
+tags = [
+    "domain:modelops",
+    "domain:dataset-prep",
+    "data:jsonl",
+]
+kind        = "domain"
+publisher   = "cairn"
+trust_level = "official"
+
+[compat]
+cairn_engine = ">=0.1.5,<0.2"

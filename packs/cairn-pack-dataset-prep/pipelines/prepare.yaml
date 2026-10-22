@@ -1,0 +1,98 @@
+# pipelines/prepare.yaml — prepare a dataset once (cairn-extensions#16).
+#
+#   source-ok ⏸ → prepare (data flow) → format → data gate
+#
+# `source-ok` is a person confirming the source, its pin and the name before anything is
+# written. `prepare` runs flows/prepare.yaml as one governed leg and, when it lands, the control plane
+# registers `<register>-train`, `-val` and `-test` with roles training, validation and test,
+# stamps each with its intake verdict, and registers the manifest (a report). `format` checks
+# the cleaned corpus's example structure against the trainers it must feed. `data-ok` stops
+# the pipeline (fail-closed) when a version came back blocked or invalid, or any example is
+# malformed; the versions stay registered and append-only, and the fine-tune pack's admission
+# refuses a version without an admitted verdict either way.
+#
+# Nothing here writes row content into the record: stats, hashes, counts and version ids.
+name: prepare
+kind: pipeline
+visibility: public
+description: >
+  Pin a dataset source, drop duplicates, profile prompt+response lengths and topics, split it
+  by group into train / val / test and register the three versions with their roles.
+outcome: Turn a raw dataset into frozen train, val and test versions
+suite: data
+
+inputs:
+  # `$inherit: prepare` wires every input below into the `prepare` leg by name (ADR-0106 D2);
+  # the specs stay because a `kind: data` flow declares only placeholder names.
+  $inherit: prepare
+  path: {type: str, description: "A Hugging Face dataset id, a local JSONL/CSV/Parquet file or an s3:// object."}
+  revision: {type: str, default: "", description: "Hub commit, tag or branch to load the source at; a commit sha is the only pin that cannot move. Ignored for a file."}
+  register: {type: str, description: "Dataset name prefix: versions <register>-train, -val and -test are registered."}
+  seed: {type: int, default: 13, description: "Split seed; the same corpus and seed give the same three versions."}
+  train_ratio: {type: float, default: 0.9}
+  val_ratio: {type: float, default: 0.05}
+  test_ratio: {type: float, default: 0.05}
+  group_by: {type: str, default: "", description: "Row field no group may straddle (a template family); empty = every row its own group."}
+  derive:
+    type: list
+    default: []
+    description: "fields.derive rules: [{field, source, mode: extract | normalize, pattern, replace, default, case}]."
+  topic_fields: {type: list, default: [], description: "Label fields counted by value in the audit (top 20)."}
+  group_fields: {type: list, default: [], description: "Grouping fields reported by size only (their values are prompt text)."}
+  near_dup_threshold: {type: float, default: 0.8, description: "Jaccard similarity above which two examples are near duplicates."}
+  base_model: {type: str, default: "", description: "The model to be trained; its tokenizer counts the lengths (whitespace words without one, said in the report)."}
+  max_seq_len: {type: int, default: 0, description: "Training sequence length; longer examples are counted (0 = no limit)."}
+  over_length: {type: str, default: "count", description: "count | drop | refuse for examples over max_seq_len. Never truncate."}
+  store: {type: str, default: "", description: "local or s3 for the exported files; empty = the environment's artifact store. A remote engine needs s3."}
+
+governance:
+  budget: {usd: 1}
+  series: dataset-prep
+  approvers: data-owners
+
+steps:
+  # The PERSON gate before anything is written: the versions this run registers are frozen
+  # under `register`, so someone confirms what is being read, at which pin, and under what name.
+  - gate: source-ok
+    approvers: data-owners
+    show:
+      - input.path
+      - input.revision
+      - input.register
+      - input.group_by
+      - input.test_ratio
+
+  - id: prepare
+    label: Pin, audit, split and register
+    flow: prepare
+    depends_on: [source-ok]
+    timeout: 60m
+
+  - id: format
+    label: Check the example structure
+    task: dataset/format
+    depends_on: [prepare]
+    with:
+      path: $steps.prepare.export_jsonl_output
+      target_trainers: [trl, unsloth]
+
+  # The DATA gate: answered by the data. `intake_verdicts` holds `<name>@<v>=<verdict>` for
+  # every version the leg registered (ADR-0102 D1).
+  - gate: data-ok
+    depends_on: [format]
+    predicate: >-
+      steps.format.conformant == steps.format.total &&
+      length(steps.prepare.findings.intake_verdicts[?contains(@, '=blocked') || contains(@, '=invalid_format')]) == `0`
+
+outputs:
+  versions: prepare.dataset_versions
+  verdicts: prepare.intake_verdicts
+  manifest: prepare.dataset_manifest_output
+  rows_in: prepare.ingest_normalize_rows
+  exact_duplicates: prepare.dedup_exact_dropped
+  near_duplicates: prepare.dedup_near_dropped_near
+  tokens_p95: prepare.profile_tokens_tokens_p95
+  over_length_rows: prepare.profile_tokens_over_length_rows
+  topics: prepare.profile_fields_topic_values
+  topic_counts: prepare.profile_fields_topic_counts
+  format: format.detected_format
