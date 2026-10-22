@@ -19,16 +19,18 @@ source-ok ⏸ → prepare (one data leg) → format → data-ok
   registered under, before anything is written.
 - **`prepare`:** the stages in [`flows/prepare.yaml`](flows/prepare.yaml):
   1. `ingest.normalize`: reads the source; a Hub dataset is loaded at `revision`.
-  2. `dedup.exact`, then `dedup.near`: drop exact and near duplicates. Near dedup needs the
-     `[all]` extra and is skipped, with a note, without it.
+  2. `dedup.exact`: drops exact duplicates.
   3. `fields.derive`: labels for a dataset that has none, for example a topic or a template
      family.
-  4. `profile.tokens`: prompt+response lengths against `max_seq_len`.
-  5. `profile.fields`: topic counts, and group sizes.
-  6. `export.jsonl`: the cleaned corpus.
-  7. `split`: group-aware, and registers `<register>-train`, `-val` and `-test` with roles
+  4. `dedup.near`: drops near duplicates, on the same text and 5-word shingles the holdout door
+     compares, so no near-duplicate pair can end up split between train and test. Needs the
+     `[all]` extra; skipped, with a note, without it.
+  5. `profile.tokens`: prompt+response lengths against `max_seq_len`.
+  6. `profile.fields`: topic counts, and group sizes.
+  7. `export.jsonl`: the cleaned corpus.
+  8. `split`: group-aware, and registers `<register>-train`, `-val` and `-test` with roles
      training, validation and test.
-  8. `dataset.manifest`: source, revision and commit, hashes, rows, fields, licence and
+  9. `dataset.manifest`: source, revision and commit, hashes, rows, fields, licence and
      citation, and the fetch time.
 
   Each registered version gets its intake verdict.
@@ -44,7 +46,7 @@ is prompt text, so it is reported by group size only.
 ```bash
 pip install cairn-pack-dataset-prep            # the pipeline; near dedup and tokenizers: [all]
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch
-cairn remote advance <pipeline-id>             # answer source-ok
+cairn remote advance <pipeline-id> source-ok  # a person confirms the source
 ```
 
 Any dataset: `-i path=<hub id | file | s3://…> -i register=<name>`, plus `-i revision=<commit>`
