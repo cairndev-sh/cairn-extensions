@@ -13,7 +13,9 @@ proven (clouds, Kubernetes, RunPod, Vast).
   `dataset.dpo_pairs`, `train.distill`.
 - **`compress/distill`:** knowledge distillation (TRL's GKD trainer).
 - **Contracts:** implements `train.run` (`cairn-contracts-training`) and the four
-  `training.stage.*` stage contracts (`cairn-contracts-training-stages`).
+  `training.stage.*` stage contracts (`cairn-contracts-training-stages`); `train.qlora` implements
+  `training.stage.train_qlora/1.1.0`, which takes governed `train_uri` / `eval_uri` / `test_uri`
+  splits and the batch, accumulation, checkpointing and dropout knobs.
 
 ## Install
 

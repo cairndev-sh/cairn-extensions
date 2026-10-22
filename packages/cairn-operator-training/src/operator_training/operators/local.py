@@ -209,7 +209,8 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float32)
     model = get_peft_model(model, LoraConfig(
-        r=spec.lora_r, lora_alpha=spec.lora_alpha, lora_dropout=0.05, task_type="CAUSAL_LM",
+        r=spec.lora_r, lora_alpha=spec.lora_alpha,
+        lora_dropout=0.05 if spec.lora_dropout is None else spec.lora_dropout, task_type="CAUSAL_LM",
     ))
 
     def _load(uri):
@@ -220,15 +221,18 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
             return load_dataset("json", data_files=uri, split="train")
         return load_dataset(uri, split="train")
 
-    ds = _load(spec.dataset_uri).map(_to_text_fn(tok))
-    # keep it small + bounded for CPU/MPS — enough rows to cover the step budget.
-    ds = ds.select(range(min(len(ds), max(16, steps * 8))))
-    eval_split = float(spec.eval_split or 0.0)
-    if eval_split > 0 and len(ds) > 4:
-        parts = ds.train_test_split(test_size=eval_split, seed=spec.seed)
-        train_ds, eval_ds = parts["train"], parts["test"]
-    else:
-        train_ds, eval_ds = ds, None
+    # cairn-extensions#4: train on `train_uri` when set (else `dataset_uri`), evaluate on a
+    # governed `eval_uri` when set (else a seeded hold-out); `test_uri` is never opened here.
+    from operator_training import splits  # noqa: PLC0415 - stdlib helper
+
+    def _bounded(d):
+        # keep it small + bounded for CPU/MPS — enough rows to cover the step budget.
+        return d.select(range(min(len(d), max(16, steps * 8))))
+
+    train_ds, eval_ds, _eval_source = splits.train_and_eval(
+        spec, lambda uri: _load(uri).map(_to_text_fn(tok)), seed=spec.seed,
+        can_split=lambda d: len(d) > 4, prepare_train=_bounded)
+    _batch = splits.batch_args(spec, per_device=1, accumulation=1)
 
     # Trackers (mlflow/wandb) — honor the spec so a validation run streams real
     # metrics to MLflow over its duration (creds bridged by #532). Empty (the
@@ -254,7 +258,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     cfg = dict(
         output_dir=out_dir, seed=spec.seed, max_steps=steps,
         learning_rate=spec.learning_rate,
-        per_device_train_batch_size=1, gradient_accumulation_steps=1,
+        **_batch,
         logging_steps=1, report_to=report_to,
         use_cpu=(device == "cpu"),
         packing=spec.packing,
@@ -263,6 +267,8 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     )
     if "dataset_text_field" in params:
         cfg["dataset_text_field"] = "text"
+    if spec.gradient_checkpointing is not None:
+        cfg["gradient_checkpointing"] = bool(spec.gradient_checkpointing)
     for k in ("max_seq_length", "max_length"):  # trl renamed this across versions
         if k in params:
             cfg[k] = 128 if validating else min(spec.max_seq_len, 512)
@@ -350,6 +356,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     tok.save_pretrained(out_dir)
 
     metrics = _base_metrics(stats, device, steps)
+    metrics.update(splits.recorded(spec, _batch, _eval_source))
     if tracking_error:
         metrics["tracking_error"] = tracking_error  # soft, like publish_error (#1709)
     if validating:

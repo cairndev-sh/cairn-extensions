@@ -255,6 +255,13 @@ def _mlflow_training_run(spec: dict[str, Any]):
         return _NoRun()
 
 
+def _trained_on(spec: dict[str, Any]) -> str:
+    """The data the run trained on: the governed train split when given (#4), else dataset_uri."""
+    from operator_training.splits import train_source  # noqa: PLC0415 - stdlib helper
+
+    return train_source(spec)
+
+
 def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> dict[str, Any]:
     """Inside the re-opened training run: log the adapter dir as the ``adapter``
     artifact and, when ``registered_model_name`` is set, create a Model Registry
@@ -277,11 +284,11 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
             # #1714 — read the RESOLVED local path (pandas chokes on the pin the
             # same way `datasets` does); `source` keeps the DECLARED uri, pin and
             # all, because that is the lineage identity worth recording.
-            df = pd.read_json(dataset_fetch.resolve_dataset_uri(str(spec["dataset_uri"])),
+            df = pd.read_json(dataset_fetch.resolve_dataset_uri(_trained_on(spec)),
                               lines=True)
-            ds = mlflow.data.from_pandas(df, source=str(spec["dataset_uri"]),
+            ds = mlflow.data.from_pandas(df, source=_trained_on(spec),
                                          name=os.path.basename(
-                                             dataset_fetch.split_pin(str(spec["dataset_uri"]))[0]))
+                                             dataset_fetch.split_pin(_trained_on(spec))[0]))
             mlflow.log_input(ds, context="training")
             out["mlflow_dataset_digest"] = str(getattr(ds, "digest", "") or "")
         except Exception as e:  # noqa: BLE001 - best-effort
@@ -295,7 +302,7 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
             tags = {"adapter_artifact_uri": f"runs:/{run_id}/adapter",
                     "base_model": str(spec.get("base_model", "")),
                     "method": str(spec.get("method", "qlora")),
-                    "dataset_uri": str(spec.get("dataset_uri", ""))}
+                    "dataset_uri": _trained_on(spec)}
             if spec.get("init_adapter_uri"):  # two-stage lineage: which adapter this continued
                 tags["init_adapter_uri"] = str(spec["init_adapter_uri"])
             if ck:
@@ -370,11 +377,17 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # relying on s3fs being present on the box), and VERIFIES the bytes against
     # the pin. This entry had bypassed `dataset_fetch` entirely, which is why the
     # retrieval rule was decorative on the GPU path.
-    dataset_path = dataset_fetch.resolve_dataset_uri(str(spec["dataset_uri"]))
-    ds = load_dataset("json", data_files=dataset_path, split="train")
-    # only `messages` survives, as in distill_entry: a raw `prompt` column would steer
-    # trl's SFTTrainer onto its prompt-completion path instead of the rendered `text`
-    ds = ds.map(_row_messages, with_indices=True, remove_columns=ds.column_names)
+    # cairn-extensions#4: the training data is `train_uri` when set (else `dataset_uri`), and a
+    # governed `eval_uri` is mapped here too, so a bad row in either fails before the model
+    # loads. `test_uri` is never opened by the trainer (splits.py).
+    from operator_training import splits  # noqa: PLC0415 - stdlib helper, keeps this entry's imports lazy
+
+    _rows: dict[str, Any] = {}
+    for _uri in [splits.train_source(spec)] + ([str(spec["eval_uri"])] if spec.get("eval_uri") else []):
+        _d = load_dataset("json", data_files=dataset_fetch.resolve_dataset_uri(_uri), split="train")
+        # only `messages` survives, as in distill_entry: a raw `prompt` column would steer
+        # trl's SFTTrainer onto its prompt-completion path instead of the rendered `text`
+        _rows[_uri] = _d.map(_row_messages, with_indices=True, remove_columns=_d.column_names)
 
     init_uri = str(spec.get("init_adapter_uri") or "").strip()
     if init_uri:
@@ -401,6 +414,10 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
             load_in_4bit=spec.get("method", "qlora") == "qlora",
         )
         peft_kw: dict[str, Any] = {"r": spec.get("lora_r", 16), "lora_alpha": spec.get("lora_alpha", 16)}
+        if spec.get("lora_dropout") is not None:
+            peft_kw["lora_dropout"] = float(spec["lora_dropout"])
+        if spec.get("gradient_checkpointing") is not None:
+            peft_kw["use_gradient_checkpointing"] = bool(spec["gradient_checkpointing"])
         tm = spec.get("target_modules") or []
         if isinstance(tm, str):  # a pipeline `with:` list may arrive stringified ("['q_proj', 'v_proj']" / "q_proj,v_proj")
             tm = [t.strip(" '\"") for t in tm.strip("[] ").split(",") if t.strip(" '\"")]
@@ -414,13 +431,12 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # column: unsloth's patched SFTTrainer refuses a conversational dataset under
     # packing without a formatting_func (found live on the C2 GPU run, 2026-08-19),
     # and a pre-rendered text column is the one shape every trl/unsloth pair takes.
-    ds = ds.map(lambda r: {"text": tokenizer.apply_chat_template(r["messages"], tokenize=False)})
-    eval_split = float(spec.get("eval_split", 0.1) or 0.0)
-    if eval_split > 0:
-        parts = ds.train_test_split(test_size=eval_split, seed=seed)
-        train_ds, eval_ds = parts["train"], parts["test"]
-    else:
-        train_ds, eval_ds = ds, None
+    def _render(d: Any) -> Any:
+        return d.map(lambda r: {"text": tokenizer.apply_chat_template(r["messages"], tokenize=False)})
+
+    train_ds, eval_ds, _eval_source = splits.train_and_eval(spec, lambda uri: _render(_rows[uri]), seed=seed)
+    # TRL's own defaults (8 per device, no accumulation) unless the spec says otherwise
+    _batch = splits.batch_args(spec, per_device=8, accumulation=1)
 
     eval_steps = int(spec.get("eval_steps", 50) or 0)
     save_steps = int(spec.get("save_steps", 50) or 50)
@@ -434,6 +450,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
         num_train_epochs=spec.get("epochs", 1.0),
         max_steps=spec.get("max_steps", 0) or -1,
         learning_rate=spec.get("learning_rate", 2e-4),
+        **_batch,
         # Mid-training eval → metrics (loss curve) for early read on convergence.
         eval_strategy=("steps" if (eval_ds is not None and eval_steps) else "no"),
         eval_steps=eval_steps or None,
@@ -483,6 +500,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     adapter_uri = _save_adapter(spec, model, tokenizer, out_dir)
 
     metrics = _base_metrics(stats)
+    metrics.update(splits.recorded(spec, _batch, _eval_source))
     if _resumed_from:
         # #1749 — a resumed run is NOT the same experiment as a fresh one, and
         # the difference used to be invisible in the record. A reader comparing
