@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.provenance.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "The deployment-tunable surface of ``dataset/provenance`` (ADR-0068/0070).\n\nA subset of ``ProvenanceInput`` \u2014 just ``required_fields``, tagged **governance**\n(ADR-0070): *which* metadata fields a dataset must declare is a data-governance\npolicy (the org's data contract), not a per-run knob. Like a gate threshold it is\n**env-owned and never weakenable** by a workflow/run \u2014 a run cannot drop a required\nfield to make a non-compliant dataset pass. ``required_fields`` is left UNBOUND in\n``run-provenance`` (no ``$default`` clobber), so env config supplies it; the default\n``[\"license\", \"source\"]`` on ``ProvenanceInput`` is the floor.",
+  "properties": {
+    "required_fields": {
+      "description": "Metadata fields that must be present and non-empty for provenance to pass. Env-owned governance: a workflow/run cannot drop a required field.",
+      "items": {"type": "string"},
+      "title": "Required provenance fields",
+      "type": "array"
+    }
+  },
+  "title": "ProvenanceConfig",
+  "type": "object",
+  "$comment": "scope: governance (ADR-0070) - env-owned; a run-supplied value is stripped (#905)"
+}

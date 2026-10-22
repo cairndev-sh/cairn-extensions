@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.split.output/1.0.0",
+  "$defs": {
+    "StratumSummary": {
+      "properties": {
+        "label": {
+          "description": "Stratify-field value (or '_all_' when not stratifying).",
+          "title": "Label",
+          "type": "string"
+        },
+        "counts": {
+          "additionalProperties": {"type": "integer"},
+          "description": "Rows landing in each split for this stratum.",
+          "title": "Counts",
+          "type": "object"
+        }
+      },
+      "required": ["label", "counts"],
+      "title": "StratumSummary",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "backend_used": {
+      "description": "'hash' or 'sklearn'.",
+      "title": "Backend Used",
+      "type": "string",
+      "enum": ["hash", "sklearn"]
+    },
+    "total": {"description": "Total rows read from the source dataset.", "title": "Total", "type": "integer"},
+    "counts": {
+      "additionalProperties": {"type": "integer"},
+      "description": "Rows written to each split (train/val/[test]).",
+      "title": "Counts",
+      "type": "object"
+    },
+    "ratios_achieved": {
+      "additionalProperties": {"type": "number"},
+      "description": "counts[name] / total for each split, rounded.",
+      "title": "Ratios Achieved",
+      "type": "object"
+    },
+    "ratios_requested": {
+      "additionalProperties": {"type": "number"},
+      "description": "The requested train/val/[test] ratios, normalized to sum to 1.",
+      "title": "Ratios Requested",
+      "type": "object"
+    },
+    "no_leakage": {
+      "description": "True iff zero group (per group_by) spans more than one split \u2014 the leakage-check evidence the readiness report cites.",
+      "title": "No Leakage",
+      "type": "boolean"
+    },
+    "group_by": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "The group field used, if any.",
+      "title": "Group By"
+    },
+    "group_count": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": null,
+      "description": "Distinct group keys seen, when group_by is set.",
+      "title": "Group Count"
+    },
+    "stratify_by": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "The stratify field used, if any.",
+      "title": "Stratify By"
+    },
+    "stratification_summary": {
+      "description": "Per-stratum split counts, when stratify_by is set.",
+      "items": {"$ref": "#/$defs/StratumSummary"},
+      "title": "Stratification Summary",
+      "type": "array"
+    },
+    "output_paths": {
+      "additionalProperties": {"type": "string"},
+      "description": "Split name -> its PRIMARY JSONL file path (the first/only shard). Unchanged when unsharded; the first shard when shard_size > 0.",
+      "title": "Output Paths",
+      "type": "object"
+    },
+    "shard_paths": {
+      "additionalProperties": {"items": {"type": "string"}, "type": "array"},
+      "description": "Split name -> every shard file written for it (#891). A single-element list per split when unsharded; the full ordered shard list when shard_size > 0 (read all of them for the complete split).",
+      "title": "Shard Paths",
+      "type": "object"
+    },
+    "child_versions": {
+      "additionalProperties": {"type": "string"},
+      "description": "#2020 \u2014 split name -> the frozen child version it registered, as 'dataset:<name>@<version>'. Empty when register_as was not set.",
+      "title": "Child Versions",
+      "type": "object"
+    },
+    "child_hashes": {
+      "additionalProperties": {"type": "string"},
+      "description": "#2020 \u2014 split name -> the child version's content hash. Same input + same policy reproduces the same hash (and therefore the same version); a different policy mints a new one.",
+      "title": "Child Hashes",
+      "type": "object"
+    },
+    "split_policy": {
+      "additionalProperties": true,
+      "description": "#2020 \u2014 the DECLARED policy recorded on every child version: ratios, stratify_by, group_by, seed, backend. A split whose policy is not on the record is a random tail nobody can reproduce.",
+      "title": "Split Policy",
+      "type": "object"
+    }
+  },
+  "required": ["backend_used", "total", "counts", "ratios_achieved", "ratios_requested", "no_leakage", "output_paths"],
+  "title": "SplitOutput",
+  "type": "object"
+}

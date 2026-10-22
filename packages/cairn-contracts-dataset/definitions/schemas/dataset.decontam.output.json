@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.decontam.output/1.0.0",
+  "properties": {
+    "checked": {
+      "description": "False when no eval set was provided (contamination not assessed).",
+      "title": "Checked",
+      "type": "boolean"
+    },
+    "train_total": {"description": "Rows in the training set.", "title": "Train Total", "type": "integer"},
+    "eval_total": {"description": "Rows in the eval/benchmark set.", "title": "Eval Total", "type": "integer"},
+    "contaminated": {
+      "description": "Training rows that also appear in the eval set.",
+      "title": "Contaminated",
+      "type": "integer"
+    },
+    "overlap_pct": {"description": "contaminated / train_total * 100, rounded.", "title": "Overlap Pct", "type": "number"},
+    "contaminated_rows": {
+      "description": "0-based training-row indices found in the eval set.",
+      "items": {"type": "integer"},
+      "title": "Contaminated Rows",
+      "type": "array"
+    },
+    "ngram_contaminated_rows": {
+      "description": "0-based training-row indices flagged by n-gram/shingle overlap (>= overlap_threshold) rather than an exact hash match. Empty when method='exact' (the default). Rows already in contaminated_rows via exact match are not repeated here even under method='both'.",
+      "items": {"type": "integer"},
+      "title": "Ngram Contaminated Rows",
+      "type": "array"
+    },
+    "minhash_contaminated_rows": {
+      "description": "0-based training-row indices flagged by MinHash+LSH approximate Jaccard overlap (>= overlap_threshold) against the eval set. Populated only when method='minhash'; empty otherwise.",
+      "items": {"type": "integer"},
+      "title": "Minhash Contaminated Rows",
+      "type": "array"
+    }
+  },
+  "required": ["checked", "train_total", "eval_total", "contaminated", "overlap_pct"],
+  "title": "DecontamOutput",
+  "type": "object"
+}

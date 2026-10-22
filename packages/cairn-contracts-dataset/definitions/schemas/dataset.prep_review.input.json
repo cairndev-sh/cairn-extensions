@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_review.input/1.0.0",
+  "properties": {
+    "post_scrub_pii_rows": {
+      "default": 0,
+      "description": "Residual PII rows the reviewer is signing off on.",
+      "minimum": 0,
+      "title": "Post Scrub Pii Rows",
+      "type": "integer"
+    },
+    "post_scrub_pii_counts": {
+      "additionalProperties": {"type": "integer"},
+      "description": "Per-kind residual counts, for the reviewer.",
+      "title": "Post Scrub Pii Counts",
+      "type": "object"
+    },
+    "reasons": {
+      "description": "The prep_gate cited reason(s) shown to the reviewer.",
+      "items": {"type": "string"},
+      "title": "Reasons",
+      "type": "array"
+    }
+  },
+  "title": "PrepReviewInput",
+  "type": "object"
+}

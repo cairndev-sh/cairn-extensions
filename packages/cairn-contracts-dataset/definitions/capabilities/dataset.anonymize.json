@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.anonymize",
+  "revision": "1.0.0",
+  "summary": "Redact PII from every row of a JSONL dataset (regex, regexset, presidio or cascade backend) and write the redacted dataset; the redaction settings are governance configuration.",
+  "input": "contract://dataset.anonymize.input/1.0.0",
+  "configuration": "contract://dataset.anonymize.configuration/1.0.0",
+  "output": "contract://dataset.anonymize.output/1.0.0"
+}

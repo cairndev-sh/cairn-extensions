@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.provenance.input/1.0.0",
+  "properties": {
+    "path": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Dataset path or HF Hub id \u2014 its DatasetInfo (license/homepage/citation) is read if present.",
+      "title": "Path"
+    },
+    "metadata_path": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Optional sidecar JSON of dataset metadata; overrides/fills DatasetInfo and carries governance flags (synthetic, synthetic_validated).",
+      "title": "Metadata Path"
+    },
+    "required_fields": {
+      "description": "Metadata fields that must be present and non-empty.",
+      "items": {"type": "string"},
+      "title": "Required Fields",
+      "type": "array"
+    }
+  },
+  "title": "ProvenanceInput",
+  "type": "object"
+}

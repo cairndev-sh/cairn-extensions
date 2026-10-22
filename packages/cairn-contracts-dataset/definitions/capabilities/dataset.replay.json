@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.replay",
+  "revision": "1.0.0",
+  "summary": "Mix prior-cycle rows into the new train slice at a governed ratio, deduplicated against the new rows: the continual-learning replay mix a retrain cycle trains on. Writes one JSONL; no LLM, no network.",
+  "input": "contract://dataset.replay.input/1.0.0",
+  "configuration": "contract://dataset.replay.configuration/1.0.0",
+  "output": "contract://dataset.replay.output/1.0.0"
+}

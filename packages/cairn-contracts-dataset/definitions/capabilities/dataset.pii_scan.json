@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.pii_scan",
+  "revision": "1.0.0",
+  "summary": "PII and secret density of a JSONL dataset: per-kind counts and flagged rows over a reservoir sample or every row, with a full-corpus secret scan.",
+  "input": "contract://dataset.pii_scan.input/1.0.0",
+  "configuration": "contract://dataset.pii_scan.configuration/1.0.0",
+  "output": "contract://dataset.pii_scan.output/1.0.0"
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_gate.input/1.0.0",
+  "properties": {
+    "post_scrub_pii_rows": {
+      "default": 0,
+      "description": "Residual PII rows in prep's SCRUBBED output (run-prep-verify).",
+      "minimum": 0,
+      "title": "Post Scrub Pii Rows",
+      "type": "integer"
+    },
+    "post_scrub_pii_counts": {
+      "additionalProperties": {"type": "integer"},
+      "description": "Per-kind residual counts (for the cited reason).",
+      "title": "Post Scrub Pii Counts",
+      "type": "object"
+    },
+    "post_scrub_pii_sampled": {
+      "default": false,
+      "description": "True if the re-scan ran over a reservoir SAMPLE (\u2192 can't certify clean).",
+      "title": "Post Scrub Pii Sampled",
+      "type": "boolean"
+    },
+    "post_scrub_pii_backend": {
+      "default": "",
+      "description": "Detector backend the re-scan used (regex | regexset | presidio).",
+      "title": "Post Scrub Pii Backend",
+      "type": "string"
+    },
+    "mode": {
+      "default": "off",
+      "description": "Enforcement mode (env-owned governance).",
+      "enum": ["off", "block", "hitl"],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "title": "PrepGateInput",
+  "type": "object"
+}

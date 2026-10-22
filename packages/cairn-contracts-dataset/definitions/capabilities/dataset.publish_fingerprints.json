@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.publish_fingerprints",
+  "revision": "1.0.0",
+  "summary": "Control-side publish of a cleaned batch's canonical row hashes to the cross-batch dedup fingerprint index; never raises (a missing store or unreadable path reports published=0 and a skipped reason).",
+  "input": "contract://dataset.publish_fingerprints.input/1.0.0",
+  "configuration": "contract://dataset.publish_fingerprints.configuration/1.0.0",
+  "output": "contract://dataset.publish_fingerprints.output/1.0.0"
+}

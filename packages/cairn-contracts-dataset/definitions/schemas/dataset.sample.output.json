@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.sample.output/1.0.0",
+  "$defs": {
+    "SamplePair": {
+      "properties": {"input": {"title": "Input", "type": "string"}, "output": {"title": "Output", "type": "string"}},
+      "required": ["input", "output"],
+      "title": "SamplePair",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "samples": {
+      "description": "Evenly-spaced, deterministic sample.",
+      "items": {"$ref": "#/$defs/SamplePair"},
+      "title": "Samples",
+      "type": "array"
+    },
+    "total_rows": {"default": 0, "description": "Rows read from the dataset.", "title": "Total Rows", "type": "integer"},
+    "extractable": {
+      "default": 0,
+      "description": "Rows with a clear (input, output) split.",
+      "title": "Extractable",
+      "type": "integer"
+    },
+    "sampled": {"default": 0, "description": "Number of pairs returned.", "title": "Sampled", "type": "integer"}
+  },
+  "title": "SampleOutput",
+  "type": "object"
+}

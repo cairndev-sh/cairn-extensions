@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.provenance",
+  "revision": "1.0.0",
+  "summary": "Declared dataset-metadata check: license/source presence and synthetic-data validation from DatasetInfo and/or a sidecar JSON; the required fields are governance configuration.",
+  "input": "contract://dataset.provenance.input/1.0.0",
+  "configuration": "contract://dataset.provenance.configuration/1.0.0",
+  "output": "contract://dataset.provenance.output/1.0.0"
+}

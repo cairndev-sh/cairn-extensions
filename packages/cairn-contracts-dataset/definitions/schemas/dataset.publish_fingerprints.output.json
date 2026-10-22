@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.publish_fingerprints.output/1.0.0",
+  "properties": {
+    "published": {
+      "default": 0,
+      "description": "Row hashes written to the index (0 when skipped \u2014 see `skipped`).",
+      "title": "Published",
+      "type": "integer"
+    },
+    "dataset_id": {"default": "", "title": "Dataset Id", "type": "string"},
+    "batch_id": {"default": "", "title": "Batch Id", "type": "string"},
+    "skipped": {
+      "anyOf": [{"type": "string", "enum": ["no_dataset_id", "no_rows", "store_unavailable"]}, {"type": "null"}],
+      "default": null,
+      "description": "Why nothing was published: 'no_dataset_id' | 'no_rows' | 'store_unavailable'. None on a real publish.",
+      "title": "Skipped"
+    },
+    "summary": {"default": "", "title": "Summary", "type": "string"}
+  },
+  "title": "PublishFingerprintsOutput",
+  "type": "object"
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.gate.output/1.0.0",
+  "properties": {
+    "verdict": {
+      "description": "pass | warn | fail.",
+      "title": "Verdict",
+      "type": "string",
+      "enum": ["pass", "warn", "fail"]
+    },
+    "dataset_uri": {
+      "default": "",
+      "description": "The validated dataset location (S3/HF/path) a downstream step trains on \u2014 the run's dataset_path, passed through (#579). Consumers should only train on it when verdict != 'fail'.",
+      "title": "Dataset Uri",
+      "type": "string"
+    },
+    "blocking": {
+      "description": "Issues that must be fixed before training (each cites a check).",
+      "items": {"type": "string"},
+      "title": "Blocking",
+      "type": "array"
+    },
+    "warnings": {
+      "description": "Non-blocking concerns (each cites a check).",
+      "items": {"type": "string"},
+      "title": "Warnings",
+      "type": "array"
+    },
+    "passed": {
+      "description": "Checks that came back clean.",
+      "items": {"type": "string"},
+      "title": "Passed",
+      "type": "array"
+    },
+    "checks_cited": {
+      "description": "The deterministic checks whose results informed this verdict.",
+      "items": {"type": "string"},
+      "title": "Checks Cited",
+      "type": "array"
+    },
+    "audit_metadata": {
+      "additionalProperties": true,
+      "description": "Compact verdict record for the audit sink (blocking/warnings/thresholds).",
+      "title": "Audit Metadata",
+      "type": "object"
+    },
+    "outcome": {
+      "description": "ADR-0075 run-level outcome metrics \u2014 the domain verdict + key check numbers as {name, value, pass, target}. Bound to $state.outcome so it surfaces on the standard output.outcome channel the pilot report / Playground read. Deterministic (mirrors the computed verdict); the LLM synthesis step never touches it.",
+      "items": {"additionalProperties": true, "type": "object"},
+      "title": "Outcome",
+      "type": "array"
+    }
+  },
+  "required": ["verdict"],
+  "title": "GateOutput",
+  "type": "object"
+}

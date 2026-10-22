@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.prep_gate",
+  "revision": "1.0.0",
+  "summary": "The config-gated post-scrub PII verdict: prep's residual-PII re-scan and the governance mode (off | block | hitl) -> action pass | block | review and verdict pass | warn | fail. Pure: no I/O, no LLM.",
+  "input": "contract://dataset.prep_gate.input/1.0.0",
+  "configuration": "contract://dataset.prep_gate.configuration/1.0.0",
+  "output": "contract://dataset.prep_gate.output/1.0.0"
+}

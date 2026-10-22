@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.pii_scan.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "The deployment-tunable surface of ``dataset/pii_scan`` (ADR-0068/0070) \u2014 the\nscan bound + backend. **Operational** scope (the default): a workflow or run may\ntune these freely (unlike a governance gate threshold). A subset of ``PiiInput``;\nthe safe defaults live on ``PiiInput`` so an un-configured run is still bounded.",
+  "properties": {
+    "preset": {
+      "default": "governed",
+      "description": "Pick a ready-made configuration, then override individual settings below if needed.\n\u2022 governed (default) \u2014 spaCy NER + regex + secret detection. Finds names, locations, emails, phones, cards, API keys. Best recall; ~7 min / 200k rows on a 2-CPU box, ~550 MB RAM.\n\u2022 logs \u2014 regex + secrets only, NO name/location detection (NER off). ~30% faster and ~200 MB RAM. Use for logs, traces, and incident data where there are no personal names to catch.",
+      "enum": ["governed", "logs"],
+      "title": "PII scan mode",
+      "type": "string"
+    },
+    "ner": {
+      "default": true,
+      "description": "Run the spaCy language model to catch PERSON, LOCATION, and ORGANIZATION \u2014 the PII that has no fixed pattern. Turn OFF for regex + secrets only: much faster and lighter, but names and places will NOT be found. Leave ON for training data; turning it off is only safe for structured/log data.",
+      "title": "Detect names & locations (NER)",
+      "type": "boolean"
+    },
+    "model": {
+      "default": "sm",
+      "description": "Which spaCy model powers name/location detection (ignored when NER is off).\n\u2022 sm (small, default) \u2014 fast, ~550 MB RAM, misses ~1-2% of names. Best fit for a small (2-CPU) box.\n\u2022 lg (large) \u2014 highest recall, ~1.2-1.7 GB RAM, same speed. Use where RAM is plentiful and you need to catch every name.\n\u2022 blank \u2014 tokenizer only, no NER at all (same as turning NER off).",
+      "enum": ["blank", "sm", "lg"],
+      "title": "Language model",
+      "type": "string"
+    },
+    "n_process": {
+      "default": 0,
+      "description": "How many CPU workers share the detection pass. 0 = auto (use all available cores) \u2014 recommended. On a 2-CPU box this is ~40% faster than a single worker. Set to 1 to force single-process (lowest RAM, e.g. when the box also runs other heavy services). Values above the core count are capped automatically.",
+      "title": "Parallel workers",
+      "type": "integer"
+    },
+    "analyze_chunk": {
+      "default": 2048,
+      "description": "How many rows are fed to the detector at once. Larger batches let the parallel workers stay busy (needed for 'Parallel workers' to help); smaller batches use less memory. 2048 is a good balance \u2014 you rarely need to change this.",
+      "title": "Rows per batch",
+      "type": "integer"
+    },
+    "sample_size": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": 1000,
+      "description": "For a go/no-go readiness verdict the scan checks a random sample rather than every row, so cost stays flat no matter how large the dataset. 1000 is a statistically sound default. Raise it for a tighter estimate; set to blank (null) to scan every single row (slower on big datasets). Note: redaction (the fix step) always processes every row \u2014 sampling applies to the CHECK only.",
+      "title": "Rows to sample"
+    },
+    "backend": {
+      "default": "auto",
+      "description": "Detector engine: 'auto' (cascade when presidio is installed, else regex) covers almost every case. Advanced: 'cascade' (regex-in-presidio, ADR-0079), 'presidio', 'regex' (zero-dep), 'regexset' ([fastpii] re2).",
+      "title": "PII backend",
+      "type": "string"
+    },
+    "secrets_full_scan": {
+      "default": true,
+      "description": "Scan every row for leaked credentials (API keys, tokens, private keys) even when name/PII detection is sampled \u2014 a rare secret would slip past a sample. Recommended on; turn off only for a pure sampled density estimate.",
+      "title": "Full-corpus secret scan",
+      "type": "boolean"
+    }
+  },
+  "title": "PiiScanConfig",
+  "type": "object"
+}

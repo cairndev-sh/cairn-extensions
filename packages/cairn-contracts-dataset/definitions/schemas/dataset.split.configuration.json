@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.split.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "Deployment-tunable knobs of ``dataset/split`` (ADR-0070) \u2014 the split ratios\n+ seed. **Operational** scope (the default): a workflow/run may tune these\nfreely. A subset of ``SplitInput``; the safe defaults live on ``SplitInput``.",
+  "properties": {
+    "train_ratio": {
+      "default": 0.9,
+      "description": "Fraction of rows/groups assigned to train.",
+      "title": "Train ratio",
+      "type": "number"
+    },
+    "val_ratio": {
+      "default": 0.1,
+      "description": "Fraction of rows/groups assigned to val.",
+      "title": "Val ratio",
+      "type": "number"
+    },
+    "test_ratio": {
+      "default": 0.0,
+      "description": "Fraction assigned to test (0 omits test.jsonl).",
+      "title": "Test ratio",
+      "type": "number"
+    },
+    "seed": {
+      "default": 13,
+      "description": "Seed for the deterministic hash/shuffle assignment (reproducible split).",
+      "title": "Split seed",
+      "type": "integer"
+    },
+    "shard_size": {
+      "default": 0,
+      "description": "Rows per output shard (#891); 0 writes one file per split (default).",
+      "title": "Output shard size",
+      "type": "integer"
+    }
+  },
+  "title": "SplitConfig",
+  "type": "object"
+}

@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.split",
+  "revision": "1.0.0",
+  "summary": "Deterministic, group-aware and optionally stratified train/val[/test] split of a JSONL dataset with a no-leakage guarantee; optionally registers each split as a frozen child version.",
+  "input": "contract://dataset.split.input/1.0.0",
+  "configuration": "contract://dataset.split.configuration/1.0.0",
+  "output": "contract://dataset.split.output/1.0.0"
+}

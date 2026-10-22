@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_review.configuration/1.0.0",
+  "description": "dataset/prep_review has no semantic configuration in v1: every knob rides the input.",
+  "type": "object",
+  "additionalProperties": false
+}
