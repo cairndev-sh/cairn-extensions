@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.profile_fields.output/1.0.0",
+  "type": "object",
+  "description": "Per count field: <f>_values, <f>_counts, <f>_other, <f>_distinct, <f>_missing. Per groups field: <f>_groups, <f>_largest, <f>_singletons, <f>_median, <f>_missing.",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "rows"
+  ]
+}

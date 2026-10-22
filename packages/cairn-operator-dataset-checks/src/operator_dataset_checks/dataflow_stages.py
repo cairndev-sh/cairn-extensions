@@ -1019,17 +1019,24 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
         raise ValueError(
             f"over_length must be one of {_OVER_LENGTH_POLICIES} — got {policy!r}. "
             "Truncation is deliberately not an option (ADR-0102 D1).")
+    # cairn-extensions#16 — `example` measures prompt + response, which is what a training
+    # sequence holds (the chat template's own tokens aside); `response` (default) as before.
+    measure = str(config.get("measure", "response")).lower()
+    if measure not in ("response", "example"):
+        raise ValueError(f"measure must be 'response' or 'example' — got {measure!r}")
     backend, tokenizer, note = _resolve_tokenizer(config)
 
     from operator_dataset_checks import _tokenizer  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks._io import JsonlWriter  # noqa: PLC0415
-    from operator_dataset_checks.operators.profile import _response_text  # noqa: PLC0415 - ONE definition of "the model's answer"
+    from operator_dataset_checks.operators.profile import _prompt_text, _response_text  # noqa: PLC0415 - ONE definition of "the model's answer"
 
     src = _current(workdir)
     within = workdir / "within-length.jsonl"
     tok_path = str(config.get("tokenizer_path") or "") or None
     tok_name = (tokenizer or None) if (backend == "tokenizers" and not tok_path) else None
     lengths: list[int] = []
+    prompt_lengths: list[int] = []
+    response_lengths: list[int] = []
     over = 0
     kept = 0
     quarantined = 0
@@ -1052,6 +1059,12 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
                     continue
                 n = _tokenizer.count(_response_text(row), backend=backend,
                                      tokenizer_name=tok_name, tokenizer_path=tok_path)
+                if measure == "example":
+                    p = _tokenizer.count(_prompt_text(row), backend=backend,
+                                         tokenizer_name=tok_name, tokenizer_path=tok_path)
+                    prompt_lengths.append(p)
+                    response_lengths.append(n)
+                    n += p
                 lengths.append(n)
                 if max_seq_len and n > max_seq_len:
                     over += 1
@@ -1083,6 +1096,12 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
     }
     if note:
         stats["token_backend_note"] = note
+    stats["measure"] = measure
+    if measure == "example":
+        for side, values in (("prompt", sorted(prompt_lengths)), ("response", sorted(response_lengths))):
+            stats.update({f"{side}_tokens_p50": _percentile(values, 0.50),
+                          f"{side}_tokens_p95": _percentile(values, 0.95),
+                          f"{side}_tokens_max": values[-1] if values else 0})
     # Histogram as FLAT scalars — only scalars cross the dataflow boundary
     # (ADR-0081 D3 / ADR-0080 R5); cairn.core.intake reassembles the buckets.
     edges = list(_TOKEN_BUCKETS)
@@ -1090,6 +1109,123 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
         high = edges[i + 1] if i + 1 < len(edges) else None
         count = sum(1 for n in lengths if n >= low and (high is None or n < high))
         stats[f"bucket_{low}_{high if high is not None else 'plus'}"] = count
+    return stats
+
+
+_DERIVE_MODES = ("extract", "normalize")
+_DERIVE_CASES = ("keep", "lower", "upper")
+
+
+def _derive_rules(config: dict) -> list[dict]:
+    """Validated ``fields.derive`` rules, each with its compiled pattern."""
+    import re  # noqa: PLC0415 - stage bodies keep their imports (D5)
+
+    rules = config.get("rules") or []
+    if not isinstance(rules, list) or not rules:
+        raise ValueError("fields.derive needs `rules`: a list of {field, source, mode, pattern}")
+    out, fields = [], set()
+    for rule in rules:
+        field, source = str(rule.get("field") or ""), str(rule.get("source") or "")
+        mode, case = str(rule.get("mode", "extract")), str(rule.get("case", "keep"))
+        if not field or not source or not rule.get("pattern"):
+            raise ValueError(f"fields.derive: a rule needs field, source and pattern — got {rule!r}")
+        if mode not in _DERIVE_MODES or case not in _DERIVE_CASES:
+            raise ValueError(f"fields.derive: mode must be one of {_DERIVE_MODES} and case one of "
+                             f"{_DERIVE_CASES} — got {mode!r}, {case!r}")
+        if field in fields:
+            raise ValueError(f"fields.derive: two rules write {field!r}")
+        fields.add(field)
+        flags = re.IGNORECASE if rule.get("ignore_case") else 0
+        out.append({"field": field, "source": source, "mode": mode, "case": case,
+                    "rx": re.compile(str(rule["pattern"]), flags),
+                    "replace": str(rule.get("replace", "#")), "default": str(rule.get("default", "other"))})
+    return out
+
+
+def fields_derive(workdir: Path, config: dict, inputs: list[str]) -> dict:
+    """cairn-extensions#16 — add fields to every row from a regular expression over another
+    field, for a dataset that has no topic or template column of its own.
+
+    ``extract`` keeps the first match (its first group when the pattern has one) and
+    ``default`` (``other``) when nothing matches — a topic label. ``normalize`` replaces every
+    match with ``replace`` (``#``) and collapses whitespace — a template family, so rows that
+    differ only in numbers or names share one value. A rule never overwrites a field the row
+    already has: the source data stays as it was, and a trainer that formats the Alpaca or chat
+    fields never sees the added ones. Stats are counts only."""
+    from operator_dataset_checks._io import JsonlWriter  # noqa: PLC0415 - data deps live in stage bodies (D5)
+
+    rules = _derive_rules(config)
+    src, tmp = _current(workdir), workdir / "derived.jsonl"
+    matched = {r["field"]: 0 for r in rules}
+    rows = 0
+    with JsonlWriter(tmp) as writer, src.open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            for r in rules:
+                if r["field"] in row:
+                    raise ValueError(f"fields.derive: rows already carry {r['field']!r}; "
+                                     "a derived field never overwrites data")
+                text = str(row.get(r["source"]) or "")
+                if r["mode"] == "extract":
+                    m = r["rx"].search(text)
+                    value = (m.group(1) if m.re.groups else m.group(0)) if m else r["default"]
+                    matched[r["field"]] += bool(m)
+                else:
+                    value = " ".join(r["rx"].sub(r["replace"], text).split())
+                    matched[r["field"]] += value != " ".join(text.split())
+                row[r["field"]] = value.lower() if r["case"] == "lower" else value.upper() if r["case"] == "upper" else value
+            writer.write(row)
+            rows += 1
+    shutil.move(str(tmp), src)
+    stats: dict = {"rows": rows, "fields": [r["field"] for r in rules]}
+    for field, n in matched.items():
+        stats[f"{field}_matched"] = n
+    return stats
+
+
+def profile_fields(workdir: Path, config: dict, inputs: list[str]) -> dict:
+    """cairn-extensions#16 — the distribution of row fields, as counts. READ-ONLY.
+
+    ``count`` fields (labels, e.g. a derived topic) report their ``top`` values (default 20,
+    each cut to ``value_chars``, default 64) and counts as two flat lists, the rest summed as
+    ``other``. ``groups`` fields (e.g. a template family, whose values are prompt text) report
+    sizes only — distinct groups, the largest, singletons, the median — never a value, so no
+    row content reaches the record."""
+    from collections import Counter  # noqa: PLC0415 - stage bodies keep their imports (D5)
+
+    count_fields = [str(f) for f in (config.get("count") or [])]
+    group_fields = [str(f) for f in (config.get("groups") or [])]
+    if not count_fields and not group_fields:
+        raise ValueError("profile.fields needs `count` or `groups` (a list of field names)")
+    top, chars = int(config.get("top", 20)), int(config.get("value_chars", 64))
+    counters = {f: Counter() for f in {*count_fields, *group_fields}}
+    missing = dict.fromkeys(counters, 0)
+    rows = 0
+    with _current(workdir).open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rows += 1
+            for f, c in counters.items():
+                if row.get(f) in (None, ""):
+                    missing[f] += 1
+                else:
+                    c[str(row[f])] += 1
+    stats: dict = {"rows": rows}
+    for f in count_fields:
+        common = counters[f].most_common(top)
+        stats.update({f"{f}_values": [" ".join(v.split())[:chars] for v, _ in common],
+                      f"{f}_counts": [n for _, n in common],
+                      f"{f}_other": sum(counters[f].values()) - sum(n for _, n in common),
+                      f"{f}_distinct": len(counters[f]), f"{f}_missing": missing[f]})
+    for f in group_fields:
+        sizes = sorted(counters[f].values())
+        stats.update({f"{f}_groups": len(sizes), f"{f}_largest": sizes[-1] if sizes else 0,
+                      f"{f}_singletons": sum(1 for n in sizes if n == 1),
+                      f"{f}_median": _percentile(sizes, 0.50), f"{f}_missing": missing[f]})
     return stats
 
 
@@ -1106,6 +1242,9 @@ for _fn in (scan_all, decontam_scan):
     _fn.risk_class = "read_only"
 # cairn-extensions#5 — the manifest describes the dataset; with store=s3 it uploads a report.
 dataset_manifest.risk_class = "external_write"
+# cairn-extensions#16 — fields.derive rewrites the working dataset; profile.fields only reads it.
+fields_derive.risk_class = "external_write"
+profile_fields.risk_class = "read_only"
 
 # ─── stage contracts (ADR-0118 D1/M3a, #2242 V1-C) ──────────────────────────
 # The readiness stages implement their shared stage contract (cairn-contracts-dataset-stages):
@@ -1124,3 +1263,8 @@ ingest_normalize.implements = ("contract://dataset.stage.ingest_normalize/1.2.0"
 dataset_manifest.implements = ("contract://dataset.stage.dataset_manifest/1.0.0",)
 # cairn-extensions#6 — the split kernel joins the stage contracts, with `export` and `register`.
 split.implements = ("contract://dataset.stage.split/1.0.0",)
+# cairn-extensions#16 — profile.tokens measures prompt + response on request (1.1.0); the two
+# field kernels are new.
+profile_tokens.implements = ("contract://dataset.stage.profile_tokens/1.1.0",)
+fields_derive.implements = ("contract://dataset.stage.fields_derive/1.0.0",)
+profile_fields.implements = ("contract://dataset.stage.profile_fields/1.0.0",)

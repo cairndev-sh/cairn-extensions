@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.fields_derive.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The field written; never one the rows already carry."
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The field read."
+          },
+          "mode": {
+            "enum": [
+              "extract",
+              "normalize"
+            ],
+            "default": "extract",
+            "description": "extract: the first match (its first group); normalize: every match replaced, whitespace collapsed."
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Python regular expression."
+          },
+          "replace": {
+            "type": "string",
+            "default": "#",
+            "description": "normalize: what each match becomes."
+          },
+          "default": {
+            "type": "string",
+            "default": "other",
+            "description": "extract: the value when nothing matches."
+          },
+          "case": {
+            "enum": [
+              "keep",
+              "lower",
+              "upper"
+            ],
+            "default": "keep"
+          },
+          "ignore_case": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "field",
+          "source",
+          "pattern"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "rules"
+  ],
+  "additionalProperties": false
+}
