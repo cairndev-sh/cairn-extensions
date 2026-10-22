@@ -6,7 +6,8 @@
 #
 # One fresh venv: every buildable member installed as a wheel (with its `test` extra when it
 # declares one), then: nothing private is installed, the repository's own tests, the catalog
-# is current, each wheel's tests, `cairn pack sync --check` per operator pack, `cairn pack check`.
+# is current, each wheel's tests, `cairn pack sync --check` per operator pack, `cairn pack check`,
+# and the core's contract resolver over every installed contract wheel.
 # The interpreter is $UV_PYTHON (default 3.13). Exits non-zero on the first failure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -68,3 +69,6 @@ while IFS= read -r w; do
   [ -n "$w" ] && cairn pack sync --check "$w"
 done <<< "$(python3 scripts/members.py --operator-packs)"
 cairn pack check
+# the launch door resolves every installed contract distribution; a wheel that is not data-only
+# (for example one carrying *.dist-info/licenses/) is refused there, and `pack check` does not see it
+python -c "from cairn.core.pack.contracts import resolve_contracts; resolve_contracts(); print('contracts resolve: ok')"
