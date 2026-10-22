@@ -8,8 +8,12 @@
 # stamps each with its intake verdict, and registers the manifest (a report). `format` checks
 # the cleaned corpus's example structure against the trainers it must feed. `data-ok` stops
 # the pipeline (fail-closed) when a version came back blocked or invalid, or any example is
-# malformed; the versions stay registered and append-only, and the fine-tune pack's admission
-# refuses a version without an admitted verdict either way.
+# malformed. The versions stay registered (the registry is append-only); a launch that names
+# a blocked or invalid one is refused by the core's intake door either way, and the fine-tune
+# pack's admission checks each version's role and verdict.
+#
+# On a remote engine set `store: s3`: the `format` leg and the holdout door read the versions
+# on the control plane, which cannot open a file:// path on the engine's box.
 #
 # Nothing here writes row content into the record: stats, hashes, counts and version ids.
 name: prepare

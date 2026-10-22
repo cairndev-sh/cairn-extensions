@@ -105,3 +105,30 @@ def test_tokens_measure_the_whole_example_on_request(tmp_path):
     assert problems(_contract("profile_tokens", "1.1.0", "output"), example, "o") == []
     with pytest.raises(ValueError, match="measure must be"):
         profile_tokens(wd, {"measure": "prompt"}, [])
+
+
+def test_an_optional_group_that_did_not_match_takes_the_default(tmp_path):
+    wd = _workdir(tmp_path)
+    rules = [{"field": "slab", "source": "output", "pattern": r"#\d+=(IFCSLAB)?", "case": "lower"}]
+    fields_derive(wd, {"rules": rules}, [])
+    assert [r["slab"] for r in _rows(wd)] == ["other", "other", "other", "other"]  # the first #n= wins
+
+
+@pytest.mark.parametrize("row, prompt", [
+    ({"messages": [{"role": "system", "content": "be brief"}, {"role": "user", "content": "what is IFC"},
+                   {"role": "assistant", "content": "a schema"}]}, "be brief\nwhat is IFC"),
+    ({"conversations": [{"from": "human", "value": "what is IFC"}, {"from": "gpt", "value": "a schema"}]}, "what is IFC"),
+    ({"prompt": "what is IFC", "completion": "a schema"}, "what is IFC"),
+    ({"instruction": "answer", "input": "", "output": "a schema"}, "answer"),
+    ({"text": "a schema"}, ""),
+])
+def test_the_prompt_side_of_every_supported_format(row, prompt):
+    from operator_dataset_checks.operators.profile import _prompt_text
+    assert _prompt_text(row) == prompt
+
+
+def test_drop_removes_examples_over_length_once_the_prompt_counts(tmp_path):
+    wd = _workdir(tmp_path)
+    stats = profile_tokens(wd, {"measure": "example", "max_seq_len": 20, "over_length": "drop"}, [])
+    short = [r for r in _rows(wd)]
+    assert stats["over_length_rows"] == 4 and stats["rows"] == 0 and short == []

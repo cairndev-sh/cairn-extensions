@@ -1173,8 +1173,10 @@ def fields_derive(workdir: Path, config: dict, inputs: list[str]) -> dict:
                 text = str(row.get(r["source"]) or "")
                 if r["mode"] == "extract":
                     m = r["rx"].search(text)
-                    value = (m.group(1) if m.re.groups else m.group(0)) if m else r["default"]
-                    matched[r["field"]] += bool(m)
+                    found = (m.group(1) if m.re.groups else m.group(0)) if m else None
+                    # An optional group that did not take part is no match either.
+                    value = found if found is not None else r["default"]
+                    matched[r["field"]] += found is not None
                 else:
                     value = " ".join(r["rx"].sub(r["replace"], text).split())
                     matched[r["field"]] += value != " ".join(text.split())
