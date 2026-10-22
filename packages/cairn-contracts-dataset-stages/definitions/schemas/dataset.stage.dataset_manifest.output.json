@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dataset_manifest.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "output": {
+      "type": "string",
+      "description": "The manifest file."
+    },
+    "kind": {
+      "const": "report"
+    },
+    "content_hash": {
+      "type": "string",
+      "description": "sha256 of the manifest file (the artifact's id)."
+    },
+    "data_content_hash": {
+      "type": "string",
+      "description": "sha256 of the working dataset — the content id its export registers as."
+    },
+    "fields": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of distinct top-level fields."
+    },
+    "dataset_rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows in the working dataset (the report itself has none)."
+    },
+    "store": {
+      "enum": [
+        "local",
+        "s3"
+      ]
+    }
+  },
+  "required": [
+    "output",
+    "kind",
+    "content_hash",
+    "data_content_hash",
+    "dataset_rows",
+    "fields",
+    "store"
+  ]
+}

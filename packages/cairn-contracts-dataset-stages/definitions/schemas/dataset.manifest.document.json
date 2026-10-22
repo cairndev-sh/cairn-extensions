@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.manifest.document/1.0.0",
+  "type": "object",
+  "description": "manifest.json: what a prepared dataset is, never its rows.",
+  "properties": {
+    "format": {
+      "const": "cairn.dataset-manifest/1"
+    },
+    "source": {
+      "type": "string"
+    },
+    "revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revision_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit a Hub revision resolved to; null for a file source or when it could not be read."
+    },
+    "source_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "sha256 of the source file read; null when the source is not a local file."
+    },
+    "snapshot_hash": {
+      "type": "string",
+      "description": "sha256 of the dataset as ingest materialised it."
+    },
+    "data_content_hash": {
+      "type": "string"
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "license": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "citation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fetched_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "quarantined_rows": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "format",
+    "source",
+    "revision",
+    "revision_sha",
+    "source_hash",
+    "snapshot_hash",
+    "data_content_hash",
+    "rows",
+    "fields",
+    "license",
+    "citation",
+    "fetched_at"
+  ],
+  "additionalProperties": false
+}

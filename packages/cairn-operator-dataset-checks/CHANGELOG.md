@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A pinned Hub revision and the bundled manifest** (cairn-extensions#5).
+  `ingest.normalize` takes `revision` (stage contract 1.2.0: configuration 1.1.0, output 1.2.0)
+  and records `revision` (Hub ids only), `revision_sha`, `fetched_at` and `snapshot_hash`, also
+  in `ingest.json`; `source_hash` stays file-only, so lineage is unchanged. New stage
+  `dataset.manifest` (`dataset.stage.dataset_manifest/1.0.0`) writes `manifest.json` after the export: source, revision,
+  hashes, rows, field names, licence and citation (null when absent), fetch time; no row
+  content. Requires `cairn-contracts-dataset-stages==1.2.0`.
+
 - **`ingest.normalize` opens a registered version's `file://` URI** (#2171, C1).
   The `#sha256=` verification hashed `Path("file:///…")`, which collapses to the
   non-existent `file:/…`; the source is now resolved to its local path before the

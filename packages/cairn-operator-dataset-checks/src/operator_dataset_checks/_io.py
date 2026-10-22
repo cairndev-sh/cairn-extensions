@@ -416,6 +416,7 @@ def load_rows(
     split: str = "train",
     strict: bool = False,
     errors: "RowErrors | None" = None,
+    revision: str | None = None,
 ) -> list[dict]:
     """Load a dataset into a list of row dicts.
 
@@ -426,6 +427,9 @@ def load_rows(
     ``strict``/``errors`` control malformed-line handling for local ``.jsonl``
     (#1008 — see :func:`_iter_jsonl`); other builders parse inside ``datasets``
     and keep their own error behavior.
+
+    ``revision`` (cairn-extensions#5) loads a Hub dataset at a commit, tag or branch; a file or
+    URL source ignores it (its ``#sha256=`` pin is the snapshot).
     """
     source = _normalize_source(source)
     p = Path(source)
@@ -445,7 +449,7 @@ def load_rows(
     elif (rb := _remote_builder(source)) is not None:  # scheme:// URL (#913)
         ds = load_dataset(rb, data_files=source, split=split)
     else:
-        ds = load_dataset(source, split=split)
+        ds = load_dataset(source, split=split, revision=revision)
     return [_drop_nulls(row) for row in ds]
 
 
@@ -455,6 +459,7 @@ def iter_rows(
     split: str = "train",
     strict: bool = False,
     errors: "RowErrors | None" = None,
+    revision: str | None = None,
 ) -> Iterator[dict]:
     """Stream a dataset row-by-row WITHOUT materializing it (issue #380).
 
@@ -467,7 +472,7 @@ def iter_rows(
     :func:`load_rows`.
 
     ``strict``/``errors`` control malformed-line handling for local ``.jsonl``
-    (#1008 — see :func:`_iter_jsonl`).
+    (#1008 — see :func:`_iter_jsonl`); ``revision`` as in :func:`load_rows`.
 
     This is the memory-safe primitive single-pass operators should consume in
     place of :func:`load_rows`.
@@ -487,7 +492,7 @@ def iter_rows(
     elif (rb := _remote_builder(source)) is not None:  # scheme:// URL (#913)
         ds = load_dataset(rb, data_files=source, split=split, streaming=True)
     else:
-        ds = load_dataset(source, split=split, streaming=True)
+        ds = load_dataset(source, split=split, streaming=True, revision=revision)
     for row in ds:
         yield _drop_nulls(row)
 
@@ -571,7 +576,26 @@ def scan_frame(source: str) -> "pl.LazyFrame | None":
     return None
 
 
-def dataset_info(source: str):
+def is_hub_id(source: str) -> bool:
+    """True when ``source`` is a Hub dataset id — not a local path, an s3 object or a URL."""
+    source = _normalize_source(source)
+    return bool(source) and not Path(source).exists() and "://" not in source
+
+
+def hub_commit(source: str, revision: str | None = None) -> str | None:
+    """The commit sha a Hub dataset id resolves to at ``revision`` (a branch or tag moves; the
+    sha does not). Best effort: None offline, for a private repo without a token, or for a
+    source that is not a Hub id."""
+    if not is_hub_id(source):
+        return None
+    try:
+        from huggingface_hub import HfApi  # noqa: PLC0415 - a dependency of datasets, needed only here
+        return HfApi().dataset_info(_normalize_source(source), revision=revision).sha
+    except Exception:  # noqa: BLE001 — provenance is best effort; the load itself already succeeded
+        return None
+
+
+def dataset_info(source: str, revision: str | None = None):
     """Cheaply read a dataset's :class:`DatasetInfo` (license, homepage,
     citation, …) without downloading/generating the data.
 
@@ -586,4 +610,4 @@ def dataset_info(source: str):
         return load_dataset_builder(builder, data_files=source).info
     if (rb := _remote_builder(source)) is not None:  # scheme:// URL (#913)
         return load_dataset_builder(rb, data_files=source).info
-    return load_dataset_builder(source).info
+    return load_dataset_builder(source, revision=revision).info

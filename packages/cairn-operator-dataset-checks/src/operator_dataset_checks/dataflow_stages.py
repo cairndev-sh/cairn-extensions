@@ -40,6 +40,11 @@ def _current(workdir: Path) -> Path:
     return workdir / "current.jsonl"
 
 
+def _ingest_record(workdir: Path) -> Path:
+    """What ``ingest.normalize`` read, for ``dataset.manifest`` later in the same leg."""
+    return workdir / "ingest.json"
+
+
 def _resolve_submit_relative(source: str) -> str:
     """A RELATIVE local path resolves against the submitter's cwd (the engine
     runs kernels in a temp workdir) — caught live on the first clean run."""
@@ -53,8 +58,16 @@ def _resolve_submit_relative(source: str) -> str:
 
 def ingest_normalize(workdir: Path, config: dict, inputs: list[str]) -> dict:
     """Materialize the working dataset: stream the source (jsonl/csv/parquet/
-    HF id) to ``current.jsonl`` and count rows — one pass, bounded memory."""
-    from operator_dataset_checks._io import JsonlWriter, RowErrors, _normalize_source, iter_rows  # noqa: PLC0415 - data deps live in stage bodies (D5)
+    HF id) to ``current.jsonl`` and count rows — one pass, bounded memory.
+
+    cairn-extensions#5 — ``config.revision`` loads a Hub id at that commit, tag or branch; the
+    stats record it with the commit it resolved to, the fetch time and ``snapshot_hash`` (the
+    materialised bytes), and the same record goes to ``ingest.json`` for ``dataset.manifest``.
+    ``source_hash`` keeps its meaning: the bytes of a local file, which the runner names as the
+    upstream export's registry id (#1432); any other source keeps the URI parent."""
+    from datetime import datetime, timezone  # noqa: PLC0415 - stage bodies keep their imports (D5)
+
+    from operator_dataset_checks._io import JsonlWriter, RowErrors, _normalize_source, hub_commit, is_hub_id, iter_rows  # noqa: PLC0415 - data deps live in stage bodies (D5)
 
     source = str(config.get("path") or (inputs[0] if inputs else ""))
     if not source:
@@ -84,12 +97,15 @@ def ingest_normalize(workdir: Path, config: dict, inputs: list[str]) -> dict:
                 f"{got[:12]}… but the registry pinned {expected_hash[:12]}… — "
                 "the object changed since registration (overwrite/corruption); "
                 "refusing to run on unverified data (#1466)")
+    # A file or URL keeps its `#sha256=` pin and ignores `revision`, so none is recorded for it.
+    revision = (str(config.get("revision") or "").strip() or None) if is_hub_id(source) else None
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     total = 0
     # #2396 (ADR-0102 D1) — malformed lines are quarantined, not fatal (#1008); their count is the
     # `quarantined_rows` the intake verdict reads: any nonzero count is `invalid_format`.
     errors = RowErrors()
     with JsonlWriter(_current(workdir)) as writer:
-        for row in iter_rows(source, errors=errors):
+        for row in iter_rows(source, errors=errors, revision=revision):
             writer.write(row)
             total += 1
     out = {"rows": total, "source": origin, "quarantined_rows": errors.count}
@@ -100,7 +116,74 @@ def ingest_normalize(workdir: Path, config: dict, inputs: list[str]) -> dict:
     # source's registry id. ~4 s per GB, one streaming pass.
     if source and os.path.isfile(source):
         out["source_hash"], out["source_bytes"] = _sha256_file(Path(source))
+    # cairn-extensions#5 — what was materialised, for every source: one Hub revision always names
+    # the same bytes and a moved branch a new hash. Never a lineage parent (`source_hash` is).
+    out["snapshot_hash"] = _sha256_file(_current(workdir))[0]
+    out["revision"] = revision
+    # Looked up after the load: a branch that moves in between records the newer commit, which
+    # `snapshot_hash` would then contradict. Pin a commit sha as `revision` to rule that out.
+    # Resolved for an unpinned Hub load too (the head it got); None for any other source.
+    out["revision_sha"] = hub_commit(source, revision)
+    out["fetched_at"] = fetched_at
+    _ingest_record(workdir).write_text(json.dumps(out, sort_keys=True), encoding="utf-8")
     return out
+
+
+def dataset_manifest(workdir: Path, config: dict, inputs: list[str]) -> dict:
+    """cairn-extensions#5 — write ``manifest.json`` for the working dataset: source, revision,
+    hashes, row count, field names, licence and citation from the Hub card (null when absent),
+    fetch time. Never a row. Runs after ``export.*`` in the same leg, so the report's parent is
+    the export and ``data_content_hash`` is the export's registry id.
+
+    ``config.store`` as in ``export.jsonl``: ``local`` keeps the file in this workdir, ``s3``
+    uploads it beside the export."""
+    from operator_dataset_checks._io import dataset_info, is_hub_id  # noqa: PLC0415 - data deps live in stage bodies (D5)
+
+    record_path = _ingest_record(workdir)
+    if not record_path.is_file():
+        raise ValueError("dataset.manifest needs an ingest.normalize stage earlier in the same leg")
+    ingest = json.loads(record_path.read_text(encoding="utf-8"))
+    digest, _size, rows = _sha256_lines(_current(workdir))
+    fields: set[str] = set()
+    with _current(workdir).open(encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    fields.update(row)
+    source = str(ingest.get("source") or "")
+    license_, citation = None, None
+    if is_hub_id(source):
+        try:
+            info = dataset_info(source, ingest.get("revision"))
+            license_, citation = (info.license or None), (info.citation or None)
+        except Exception:  # noqa: BLE001 — a card that cannot be read is recorded as absent, not guessed
+            pass
+    manifest = {
+        "format": "cairn.dataset-manifest/1",
+        "source": source,
+        "revision": ingest.get("revision"),
+        "revision_sha": ingest.get("revision_sha"),
+        "source_hash": ingest.get("source_hash"),
+        "snapshot_hash": ingest.get("snapshot_hash") or digest,
+        "data_content_hash": digest,
+        "rows": rows,
+        "quarantined_rows": int(ingest.get("quarantined_rows") or 0),
+        "fields": sorted(fields),
+        "license": license_,
+        "citation": citation,
+        "fetched_at": ingest.get("fetched_at"),
+    }
+    name = str(config.get("name", "manifest.json"))
+    path = workdir / name
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out = {"kind": "report", "content_hash": _sha256_file(path)[0], "data_content_hash": digest,
+           "dataset_rows": rows, "fields": len(fields)}
+    store = str(config.get("store") or _artifact_store_backend()).lower()
+    if store == "s3":
+        return {**out, "output": _s3_upload(path, _s3_export_uri(workdir, name, root=config.get("root"))),
+                "store": "s3"}
+    return {**out, "output": str(path), "store": "local"}
 
 
 def dedup_exact(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -980,6 +1063,8 @@ for _fn in (ingest_normalize, dedup_exact, dedup_near, decontam_apply, pii_redac
     _fn.risk_class = "external_write"
 for _fn in (scan_all, decontam_scan):
     _fn.risk_class = "read_only"
+# cairn-extensions#5 — the manifest describes the dataset; with store=s3 it uploads a report.
+dataset_manifest.risk_class = "external_write"
 
 # ─── stage contracts (ADR-0118 D1/M3a, #2242 V1-C) ──────────────────────────
 # The readiness stages implement their shared stage contract (cairn-contracts-dataset-stages):
@@ -992,3 +1077,7 @@ for _fn in (ingest_normalize, dedup_exact, dedup_near, decontam_apply, pii_redac
 # 1.1.0 revision, which requires them (1.0.0 stays published, unchanged).
 for _fn in (ingest_normalize, export_jsonl):
     _fn.implements = (f"contract://dataset.stage.{_fn.__name__}/1.1.0",)
+# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, same output); the manifest
+# stage is new.
+ingest_normalize.implements = ("contract://dataset.stage.ingest_normalize/1.2.0",)
+dataset_manifest.implements = ("contract://dataset.stage.dataset_manifest/1.0.0",)

@@ -12,8 +12,11 @@ share one row vocabulary:
   `publish_fingerprints`.
 - **Dataflow stages** (`cairn.dataflow_stages`): `ingest.normalize`, `dedup.exact`,
   `dedup.near`, `decontam.apply`, `decontam.scan`, `pii.redact`, `profile.tokens`, `split`,
-  `scan.all`, `sample.rows`, `curate.score`, `filter.rows`, `export.jsonl`, `export.parquet`
-  — the admission and cleaning chain an engine runs.
+  `scan.all`, `sample.rows`, `curate.score`, `filter.rows`, `export.jsonl`, `export.parquet`,
+  `dataset.manifest` — the admission and cleaning chain an engine runs. `ingest.normalize`
+  takes `revision` to load a Hub dataset at a commit, tag or branch; `dataset.manifest`, after
+  the export, writes `manifest.json` (source, revision and its commit, hashes, rows, field names,
+  licence, citation, fetch time; never a row).
 - **Dataset reader** (`cairn.dataset_readers`): `rows`, the bounded preview reader.
 - **Contracts:** implements the `dataset.*` capability contracts (`cairn-contracts-dataset`)
   and the `dataset.stage.*` stage contracts (`cairn-contracts-dataset-stages`).
