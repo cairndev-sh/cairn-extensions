@@ -15,9 +15,14 @@ approve-run ⏸ → smoke → smoke-ok → train → improved → promote-model 
 ```
 
 - **Admission, at launch.** Before any record exists, cairn's launch door checks the three
-  versions. A blocked or invalid intake verdict refuses the launch, and so does training data that
-  meets a registered test or golden version (the holdout door). It also checks the base model's
-  licence. The decision is on the pipeline record and on the first gate's card.
+  versions:
+  - each has the role its input declares (ADR-0142), so a test set given as training data, or a
+    path instead of a registered version, refuses the launch;
+  - the train and val versions carry an intake verdict, and a blocked or invalid one refuses;
+  - training data that meets a registered test or golden version refuses (the holdout door);
+  - the base model's licence.
+
+  The decision is on the pipeline record and on the first gate's card.
 - **`approve-run`:** a person reads it before GPU time is spent.
 - **`smoke`:** the [`sft-train`](flows/sft-train.yaml) flow on a recorded subsample
   (`smoke_rows`, default 64) for `smoke_steps` (default 5). It proves the data, the tokenizer,

@@ -3,11 +3,14 @@
 #   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → improved → promote-model ⏸ → promote ⏸
 #
 # Prepared data only: `train_version`, `val_version` and `test_version` are registered `dataset:`
-# refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. What the
-# launch door already decides, before any record exists, is the admission: every version's intake
-# verdict (a blocked or invalid one refuses the launch), the holdout check (training data that
-# meets a registered test or golden version refuses it) and the base model's licence. The
-# decision is on the pipeline record and on the first gate's card.
+# refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. The launch
+# door decides the admission before any record exists:
+#   * each version has the role its input declares (ADR-0142): a test set given as training data,
+#     or a path instead of a registered version, refuses the launch;
+#   * the train and val versions carry an intake verdict, and none is blocked or invalid;
+#   * the holdout check: training data that meets a registered test or golden version refuses it;
+#   * the base model's licence.
+# The decision is on the pipeline record and on the first gate's card.
 #
 #   * `approve-run` — a person reads the admission and the run's settings before GPU time is
 #     spent.
@@ -35,9 +38,11 @@ outcome: Fine-tune a model on prepared data and decide whether to keep it
 suite: model
 
 inputs:
-  train_version: {type: str, description: "dataset:<name>-train@<v> — the registered training version."}
-  val_version: {type: str, description: "dataset:<name>-val@<v> — the registered validation version."}
-  test_version: {type: str, description: "dataset:<name>-test@<v> — the registered test version; recorded, never trained on."}
+  # ADR-0142 — each version must have the role its input names, and a training version must carry
+  # an intake verdict; the launch door refuses anything else before a record exists.
+  train_version: {type: str, role: training, verdict: required, description: "dataset:<name>-train@<v> — the registered training version."}
+  val_version: {type: str, role: validation, verdict: required, description: "dataset:<name>-val@<v> — the registered validation version."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; recorded, never trained on."}
   base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
   accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
   method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}

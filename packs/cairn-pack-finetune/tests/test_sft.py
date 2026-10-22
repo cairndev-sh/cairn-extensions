@@ -142,3 +142,28 @@ def test_the_full_run_never_trains_on_a_subsample_and_always_measures_the_baseli
         assert smoke[key] == train[key]
     # its own directory on the box, so the full run never resumes from the smoke run
     assert smoke["output_name"] == "$input.smoke_output_name" and train["output_name"] == "$input.output_name"
+
+
+async def test_the_launch_door_refuses_a_test_set_given_as_training_data(versions, monkeypatch):
+    """ADR-0142 through the real launch door with this pack's `sft` definition: the refusal comes
+    before any record (the bridge is never called)."""
+    import cairn.core.storage.artifacts as artifacts
+    from cairn.core.admission_door import AdmissionRefusedError
+    from cairn.core.dispatch.pipeline_launch import launch_pipeline_def
+    from cairn.core.engine.pipeline import parse_pipeline_def
+
+    monkeypatch.setattr(artifacts, "build_artifact_store", lambda *a, **k: versions)
+    for name in ("demo-train", "demo-val"):
+        await versions.set_dataset_version_verdict(name, 1, verdict="admitted", reasons=[], report={})
+
+    class _Bridge:
+        async def start_pipeline(self, *a, **k):
+            raise AssertionError("a refused launch must not reach the bridge")
+
+    d = parse_pipeline_def((PACK / "pipelines" / "sft.yaml").read_text(encoding="utf-8"), pack="finetune")
+    swapped = {**_INPUTS, "train_version": "dataset:demo-test@1", "test_version": "dataset:demo-train@1"}
+    with pytest.raises(AdmissionRefusedError) as refused:
+        await launch_pipeline_def(d, inputs=swapped, bridge=_Bridge())
+    reasons = refused.value.decision.refusing_reasons
+    assert any("train_version" in r and "is a test version" in r for r in reasons), reasons
+    assert any("test_version" in r and "is a training version" in r for r in reasons), reasons
