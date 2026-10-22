@@ -197,9 +197,14 @@ def _spec_from_config(config: dict, inputs: list[str], workdir: Path | None = No
     # its record rides `extra`, which ADR-0103 D3 writes into the run's
     # `parameters` event: the fidelity is on the record of the run that used it,
     # not only in a stage's stats.
+    # cairn-extensions#4: a governed train split is the training data; dataset_uri mirrors it
+    # when absent, so TrainSpec (and train.run/1.0.0's required dataset_uri) still validate.
+    if fields.get("train_uri") and not fields.get("dataset_uri"):
+        fields["dataset_uri"] = fields["train_uri"]
     record = _fidelity_record(workdir) if workdir is not None else {}
     if record.get("fidelity_sampled") and record.get("path"):
-        fields["dataset_uri"] = str(record["path"])
+        # the subsample REPLACES whichever source trains: train_uri when governed, else dataset_uri
+        fields["train_uri" if fields.get("train_uri") else "dataset_uri"] = str(record["path"])
         extra = dict(fields.get("extra") or {})
         extra.update({k: v for k, v in record.items() if k.startswith("fidelity_")})
         fields["extra"] = extra
@@ -432,8 +437,11 @@ def package_adapter(workdir: Path, config: dict, inputs: list[str]) -> dict:
 # launch door, checked on the control plane and in the runner. An engine that does not declare
 # `carries_stage_contracts` refuses the flow (D7) — builtin, SSH and Metaflow do. The other
 # kernels in this module (train.distill, dataset.dpo_pairs, …) stay legacy until their slices.
-for _fn in (sample_fidelity, train_qlora, eval_checkpoints, package_adapter):
+for _fn in (sample_fidelity, eval_checkpoints, package_adapter):
     _fn.implements = (f"contract://training.stage.{_fn.__name__}/1.0.0",)
+# cairn-extensions#4 — train.qlora implements 1.1.0: the governed splits (train/eval/test URIs)
+# and the batch, accumulation, checkpointing and dropout knobs; `extra` is not configuration.
+train_qlora.implements = ("contract://training.stage.train_qlora/1.1.0",)
 
 
 _ABSTAIN = "I don't know."
