@@ -76,17 +76,19 @@ async def test_prepare_registers_three_versions_with_their_roles_and_verdicts(tm
     # The audit: duplicates, prompt+response lengths, topics; the split kept every family on one side.
     assert (stats["ingest.normalize.rows"], stats["dedup.exact.dropped"]) == (200, 6)
     assert stats["profile.tokens.measure"] == "example" and stats["profile.tokens.prompt_tokens_p95"] > 0
+    # near dedup runs only with the [minhash] extra; every count below follows what it dropped
+    near = stats["dedup.near.dropped_near"]
     topics = dict(zip(stats["profile.fields.topic_values"], stats["profile.fields.topic_counts"]))
-    assert topics["IFCWALLSTANDARDCASE"] == 24 and topics["other"] == 2
+    assert 24 - near <= topics["IFCWALLSTANDARDCASE"] <= 24 and topics["other"] == 2
     assert stats["split.no_leakage"] is True
-    assert sum(d.rows for d in result.named_outputs) == 194
+    assert sum(d.rows for d in result.named_outputs) == 194 - near
 
 
 async def test_the_manifest_and_the_record_carry_no_row_content(tmp_path, store):
     result = _prepare(tmp_path / "wd", _preset_config())
     stats = await _register(result, store)
     manifest = json.loads(Path(stats["dataset.manifest.output"]).read_text(encoding="utf-8"))
-    assert manifest["rows"] == 194 and set(manifest["fields"]) == {"instruction", "input", "output", "topic", "family"}
+    assert manifest["rows"] == 194 - stats["dedup.near.dropped_near"] and set(manifest["fields"]) == {"instruction", "input", "output", "topic", "family"}
     record = json.dumps(stats) + json.dumps(manifest)
     for text in ("shear wall", "IFCPROJECT(", "Industry Foundation Classes, an open"):
         assert text not in record
