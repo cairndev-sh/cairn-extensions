@@ -495,10 +495,23 @@ def _pii_redact_duckdb(workdir: Path, *, kinds=None) -> dict:
 def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
     """Deterministic group-aware train/val[/test] split — the ``SplitOp`` body.
     Terminal stage: writes ``workdir/splits/<name>.jsonl`` per split (the prep
-    convention); ``current.jsonl`` is left as-is for any sibling export stage."""
+    convention); ``current.jsonl`` is left as-is for any sibling export stage.
+
+    cairn-extensions#6 — ``config.export`` returns each split as a product of the stage: its
+    ``outputs.<name>.*`` stats (file, hash, rows; uploaded beside the export with ``store: s3``)
+    become one artifact descriptor per split in the runner. ``config.register`` names the
+    dataset versions ``<register>-train`` / ``-val`` / ``-test`` with roles training /
+    validation / test — the names and roles ``dataset/split`` registers — so the holdout door
+    finds the test version the trainer must not meet."""
     from operator_dataset_checks.operators.split import run_split  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks.schemas.split import SplitInput  # noqa: PLC0415
 
+    export = bool(config.get("export", False))
+    register = str(config.get("register") or "").strip()
+    if register and not export:
+        raise ValueError("split: `register` needs `export: true` (only exported splits are registered)")
+    if export and int(config.get("shard_size", 0)):
+        raise ValueError("split: `export` needs shard_size 0 (one file per split is one product)")
     out_dir = workdir / "splits"
     result = run_split(SplitInput(
         path=str(_current(workdir)), output_dir=str(out_dir),
@@ -517,7 +530,35 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
         stats[f"rows_{name}"] = n
     for name, p in result.output_paths.items():
         stats[f"{name}_path"] = p
+    if export:
+        stats.update(_split_products(workdir, config, result.output_paths, register))
     return stats
+
+
+#: The role each split is registered for — the names and roles `dataset/split` uses (#2020).
+_SPLIT_ROLES = {"train": "training", "val": "validation", "test": "test"}
+
+
+def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> dict:
+    """The ``outputs`` stats of an exported split: per non-empty split its file (local, or
+    uploaded with ``store: s3``), hash, size, rows and, with ``register``, the version name and
+    role. An empty split is no product: registering a 0-row version would only be refused."""
+    store = str(config.get("store") or _artifact_store_backend()).lower()
+    out: dict = {"outputs": []}
+    for name, path in paths.items():
+        digest, size, rows = _sha256_lines(Path(path))
+        if not rows:
+            continue
+        uri = (_s3_upload(Path(path), _s3_export_uri(workdir, f"{name}.jsonl", root=config.get("root")))
+               if store == "s3" else str(path))
+        out["outputs"].append(name)
+        out.update({f"outputs.{name}.output": uri, f"outputs.{name}.content_hash": digest,
+                    f"outputs.{name}.bytes": size, f"outputs.{name}.rows": rows,
+                    f"outputs.{name}.kind": "dataset"})
+        if register:
+            out[f"outputs.{name}.register_as"] = f"{register}-{name}"
+            out[f"outputs.{name}.register_role"] = _SPLIT_ROLES[name]
+    return out
 
 
 def scan_all(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -1077,7 +1118,9 @@ for _fn in (ingest_normalize, dedup_exact, dedup_near, decontam_apply, pii_redac
 # 1.1.0 revision, which requires them (1.0.0 stays published, unchanged).
 for _fn in (ingest_normalize, export_jsonl):
     _fn.implements = (f"contract://dataset.stage.{_fn.__name__}/1.1.0",)
-# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, same output); the manifest
-# stage is new.
+# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, output 1.2.0); the
+# manifest stage is new.
 ingest_normalize.implements = ("contract://dataset.stage.ingest_normalize/1.2.0",)
 dataset_manifest.implements = ("contract://dataset.stage.dataset_manifest/1.0.0",)
+# cairn-extensions#6 — the split kernel joins the stage contracts, with `export` and `register`.
+split.implements = ("contract://dataset.stage.split/1.0.0",)

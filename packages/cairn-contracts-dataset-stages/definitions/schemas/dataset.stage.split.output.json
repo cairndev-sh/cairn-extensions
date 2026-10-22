@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.split.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows split."
+    },
+    "backend": {
+      "type": "string",
+      "description": "The backend that ran (hash or sklearn)."
+    },
+    "no_leakage": {
+      "type": "boolean",
+      "description": "No group_by value spans two splits."
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "train",
+          "val",
+          "test"
+        ]
+      },
+      "description": "With export: the splits returned as products, each described by outputs.<name>.* keys."
+    }
+  },
+  "required": [
+    "rows",
+    "backend",
+    "no_leakage"
+  ]
+}

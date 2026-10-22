@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.split",
+  "revision": "1.0.0",
+  "summary": "`split` — deterministic, group-aware train/val[/test] split of the working dataset into splits/<name>.jsonl. With `export`, each split is a product of the stage (file, hash, rows) and, with `register`, a dataset version carrying its role.",
+  "configuration": "contract://dataset.stage.split.configuration/1.0.0",
+  "output": "contract://dataset.stage.split.output/1.0.0"
+}
