@@ -137,7 +137,7 @@ def dataset_manifest(workdir: Path, config: dict, inputs: list[str]) -> dict:
 
     ``config.store`` as in ``export.jsonl``: ``local`` keeps the file in this workdir, ``s3``
     uploads it beside the export."""
-    from operator_dataset_checks._io import dataset_info, is_hub_id  # noqa: PLC0415 - data deps live in stage bodies (D5)
+    from operator_dataset_checks._io import dataset_info, hub_card_license, is_hub_id  # noqa: PLC0415 - data deps live in stage bodies (D5)
 
     record_path = _ingest_record(workdir)
     if not record_path.is_file():
@@ -159,6 +159,8 @@ def dataset_manifest(workdir: Path, config: dict, inputs: list[str]) -> dict:
             license_, citation = (info.license or None), (info.citation or None)
         except Exception:  # noqa: BLE001 — a card that cannot be read is recorded as absent, not guessed
             pass
+        # the card's own `license:` first: the builder info is often empty for a repo of files
+        license_ = hub_card_license(source, ingest.get("revision")) or license_
     manifest = {
         "format": "cairn.dataset-manifest/1",
         "source": source,
