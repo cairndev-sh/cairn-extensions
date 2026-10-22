@@ -28,10 +28,18 @@ def test_every_pinned_package_is_a_key():
     assert env["platform"]
 
 
-def test_missing_package_records_absent_not_an_error():
+def test_missing_package_records_absent_not_an_error(monkeypatch):
+    # unsloth is CUDA-only: absent on a CPU box, the honest answer is "absent", and it must not
+    # look like a probe failure. Made absent here, so the test holds on a GPU box that has it.
+    real = env_fingerprint.version
+
+    def version(dist):
+        if dist == "unsloth":
+            raise env_fingerprint.PackageNotFoundError(dist)
+        return real(dist)
+
+    monkeypatch.setattr(env_fingerprint, "version", version)
     env = trainer_env()
-    # unsloth is CUDA-only and never installed in CI — the honest answer is
-    # "absent", and it must not look like a probe failure.
     assert env["unsloth"] == env_fingerprint.ABSENT
 
 
