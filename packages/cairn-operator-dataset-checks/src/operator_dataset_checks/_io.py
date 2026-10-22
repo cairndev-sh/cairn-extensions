@@ -595,6 +595,26 @@ def hub_commit(source: str, revision: str | None = None) -> str | None:
         return None
 
 
+def hub_card_license(source: str, revision: str | None = None) -> str | None:
+    """The licence the Hub dataset card declares (its YAML ``license:``), at ``revision``.
+
+    ``datasets``' builder info is often empty for a repository of plain files even when the card
+    names a licence (found on Dietmar2020/ifc-bim-high-quality-alpaca: card ``apache-2.0``,
+    builder ``''``), so the card is the source. Best effort: None offline, without the card, or
+    for a source that is not a Hub id."""
+    if not is_hub_id(source):
+        return None
+    try:
+        from huggingface_hub import HfApi  # noqa: PLC0415 - a dependency of datasets, needed only here
+        card = HfApi().dataset_info(_normalize_source(source), revision=revision).card_data
+        value = card.get("license") if card else None
+    except Exception:  # noqa: BLE001 — provenance is best effort; an unreadable card is recorded as absent
+        return None
+    if isinstance(value, (list, tuple)):
+        value = ", ".join(str(v) for v in value if v)
+    return str(value).strip() or None if value else None
+
+
 def dataset_info(source: str, revision: str | None = None):
     """Cheaply read a dataset's :class:`DatasetInfo` (license, homepage,
     citation, …) without downloading/generating the data.
