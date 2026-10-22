@@ -431,6 +431,10 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # column: unsloth's patched SFTTrainer refuses a conversational dataset under
     # packing without a formatting_func (found live on the C2 GPU run, 2026-08-19),
     # and a pre-rendered text column is the one shape every trl/unsloth pair takes.
+    # cairn-extensions#7 — a base model's tokenizer has no chat template; ChatML is used, and recorded.
+    from operator_training.chat_template import ensure_chat_template  # noqa: PLC0415 - stdlib helper
+    _chat_template = ensure_chat_template(tokenizer)
+
     def _render(d: Any) -> Any:
         return d.map(lambda r: {"text": tokenizer.apply_chat_template(r["messages"], tokenize=False)})
 
@@ -492,8 +496,6 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     resume = os.path.isdir(out_dir) and any(
         p.startswith("checkpoint-") for p in os.listdir(out_dir)
     )
-    _baseline = splits.baseline(spec, trainer.evaluate, has_eval=eval_ds is not None,
-                                resumed=bool(resume or _resumed_from))
     stats = trainer.train(resume_from_checkpoint=resume)
 
     _stage(reporter, "export")
@@ -503,7 +505,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
 
     metrics = _base_metrics(stats)
     metrics.update(splits.recorded(spec, _batch, _eval_source))
-    metrics.update(_baseline)
+    metrics["chat_template"] = _chat_template
     if _resumed_from:
         # #1749 — a resumed run is NOT the same experiment as a fresh one, and
         # the difference used to be invisible in the record. A reader comparing
@@ -522,6 +524,9 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     with mlrun:
         if eval_ds is not None:
             metrics["eval_loss"] = float(trainer.evaluate().get("eval_loss", 0.0))
+        # cairn-extensions#7 — the base model on the same rows: the adapter switched off, after training
+        metrics.update(splits.baseline(
+            spec, lambda: splits.evaluate_with_adapter_disabled(model, trainer), has_eval=eval_ds is not None))
         reg = _mlflow_log_and_register(spec, out_dir, mlrun)
         if reg:
             metrics.update(reg)

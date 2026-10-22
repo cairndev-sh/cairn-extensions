@@ -27,10 +27,10 @@ approve-run ⏸ → smoke → smoke-ok → train → improved → promote-model 
 - **`smoke`:** the [`sft-train`](flows/sft-train.yaml) flow on a recorded subsample
   (`smoke_rows`, default 64) for `smoke_steps` (default 5). It proves the data, the tokenizer,
   the trainer and the packaging cheaply.
-- **`train`:** the full run. The trainer evaluates on `val_version` once before the first step
-  (`baseline_eval_loss`: the base model, since a fresh adapter is a no-op) and at the end
-  (`eval_loss`: the candidate). `max_eval_loss` fails it fast. `package.adapter` registers the
-  adapter as a model.
+- **`train`:** the full run. At the end the trainer evaluates on `val_version` twice: the
+  candidate (`eval_loss`), and the base model with the adapter switched off
+  (`baseline_eval_loss`) — the same rows, the same trainer. `max_eval_loss` fails it fast.
+  `package.adapter` registers the adapter as a model.
 - **`improved`:** the candidate's validation loss must be below the base model's.
 - **`promote-model`:** a person decides, with the losses on the card.
 - **`promote`:** `artifact/promote` points `tag` at the adapter, after its own approval.

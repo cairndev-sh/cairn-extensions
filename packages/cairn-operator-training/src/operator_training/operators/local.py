@@ -350,7 +350,6 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
         trainer = _mk(processing_class=tok)
     except TypeError:  # older trl
         trainer = _mk(tokenizer=tok)
-    _baseline = splits.baseline(spec, trainer.evaluate, has_eval=eval_ds is not None, resumed=False)
     stats = trainer.train()
     _stage(reporter, "export")
     trainer.save_model(out_dir)
@@ -358,7 +357,6 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
 
     metrics = _base_metrics(stats, device, steps)
     metrics.update(splits.recorded(spec, _batch, _eval_source))
-    metrics.update(_baseline)
     if tracking_error:
         metrics["tracking_error"] = tracking_error  # soft, like publish_error (#1709)
     if validating:
@@ -371,6 +369,9 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
             metrics["eval_loss"] = float(trainer.evaluate().get("eval_loss", 0.0))
         except Exception as e:  # noqa: BLE001
             metrics["eval_error"] = str(e)[:200]
+    # cairn-extensions#7 — the base model on the same rows: the adapter switched off, after training
+    metrics.update(splits.baseline(
+        spec, lambda: splits.evaluate_with_adapter_disabled(trainer.model, trainer), has_eval=eval_ds is not None))
     # ADR-0064 §2: surface the durable checkpoint location (if any checkpoint was
     # written AND a checkpoint bucket is configured) so the control loop can
     # relaunch a dead job onto it. Best-effort — never fails the train.

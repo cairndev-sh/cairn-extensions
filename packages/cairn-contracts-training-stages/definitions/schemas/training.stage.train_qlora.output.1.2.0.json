@@ -50,11 +50,11 @@
     },
     "baseline_eval_loss": {
       "type": "number",
-      "description": "With baseline_eval: the evaluation loss before the first step."
+      "description": "With baseline_eval: the base model's evaluation loss (the adapter disabled)."
     },
     "baseline_skipped": {
       "type": "string",
-      "description": "With baseline_eval: why no baseline was measured (no evaluation data, or a resumed run)."
+      "description": "With baseline_eval: why no baseline was measured (no evaluation data, or no loss reported)."
     }
   },
   "required": [

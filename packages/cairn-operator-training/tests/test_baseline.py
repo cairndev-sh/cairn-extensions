@@ -12,35 +12,56 @@ from operator_training import splits
 from operator_training.flow_stages import train_qlora
 
 
-def _evaluate(calls: list):
+def _evaluate(calls: list, key: str = "baseline_loss"):
     def evaluate():
         calls.append(1)
-        return {"eval_loss": 2.5}
+        return {key: 2.5}
     return evaluate
 
 
 def test_off_by_default_and_never_evaluates():
     calls: list = []
-    assert splits.baseline({}, _evaluate(calls), has_eval=True, resumed=False) == {}
+    assert splits.baseline({}, _evaluate(calls), has_eval=True) == {}
     assert calls == []
 
 
-def test_measures_once_before_training():
+@pytest.mark.parametrize("key", ["baseline_loss", "eval_loss"])
+def test_measures_the_base_model_once(key):
     calls: list = []
-    assert splits.baseline({"baseline_eval": True}, _evaluate(calls), has_eval=True, resumed=False) == {
+    assert splits.baseline({"baseline_eval": True}, _evaluate(calls, key), has_eval=True) == {
         "baseline_eval_loss": 2.5}
     assert calls == [1]
 
 
-@pytest.mark.parametrize("has_eval, resumed, reason", [
-    (False, False, "no evaluation data"),
-    (True, True, "resumed from a checkpoint"),
-])
-def test_skipped_with_the_reason_when_it_would_not_measure_the_base_model(has_eval, resumed, reason):
+def test_skipped_with_the_reason_without_evaluation_data():
     calls: list = []
-    assert splits.baseline({"baseline_eval": True}, _evaluate(calls), has_eval=has_eval, resumed=resumed) == {
-        "baseline_skipped": reason}
+    assert splits.baseline({"baseline_eval": True}, _evaluate(calls), has_eval=False) == {
+        "baseline_skipped": "no evaluation data"}
     assert calls == []
+
+
+def test_the_base_model_is_the_model_with_its_adapter_disabled():
+    """Found on the first GPU run: evaluating BEFORE train() left the fp16 LoRA weights unscalable.
+    The baseline is measured after training, inside PEFT's disable_adapter()."""
+    seen: list = []
+
+    class _Model:
+        def disable_adapter(self):
+            class _Ctx:
+                def __enter__(self_inner):
+                    seen.append("off")
+
+                def __exit__(self_inner, *a):
+                    seen.append("on")
+            return _Ctx()
+
+    class _Trainer:
+        def evaluate(self, metric_key_prefix="eval"):
+            seen.append(f"evaluate:{metric_key_prefix}")
+            return {f"{metric_key_prefix}_loss": 3.0}
+
+    assert splits.evaluate_with_adapter_disabled(_Model(), _Trainer()) == {"baseline_loss": 3.0}
+    assert seen == ["off", "evaluate:baseline", "on"]
 
 
 def _schema(uri: str) -> dict:
@@ -63,5 +84,5 @@ def test_the_stage_reports_the_baseline_under_its_1_2_0_contract(tmp_path):
 
 
 def test_an_evaluation_without_a_loss_is_recorded_as_skipped_not_as_zero():
-    out = splits.baseline({"baseline_eval": True}, lambda: {"eval_runtime": 1.0}, has_eval=True, resumed=False)
+    out = splits.baseline({"baseline_eval": True}, lambda: {"eval_runtime": 1.0}, has_eval=True)
     assert out == {"baseline_skipped": "the evaluation reported no eval_loss"}

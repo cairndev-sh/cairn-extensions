@@ -15,7 +15,7 @@ name: sft-train
 kind: ml
 description: >
   Fine-tune with LoRA or 4-bit QLoRA on prepared train / val versions: an optional recorded
-  subsample, the base model's validation loss before the first step, training, a fail-fast
+  subsample, training, the base model's validation loss (the adapter disabled), a fail-fast
   checkpoint check, and the packaged candidate adapter.
 
 stages:

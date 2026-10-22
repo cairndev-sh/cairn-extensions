@@ -16,8 +16,8 @@
 #     spent.
 #   * `smoke` — the same flow on a recorded subsample for a few steps: the whole path (data,
 #     tokenizer, trainer, packaging) proved cheaply before the full run.
-#   * `train` — the full run. The trainer evaluates on `val_version` once before the first step
-#     (`baseline_eval_loss`, the base model) and again at the end (`eval_loss`, the candidate).
+#   * `train` — the full run. The trainer evaluates on `val_version` at the end twice: the candidate
+#     (`eval_loss`) and, with the adapter switched off, the base model (`baseline_eval_loss`).
 #   * `improved` — the candidate's validation loss must be below the base model's.
 #   * `promote-model` — a person decides, with the losses on the card.
 #   * `promote` — the `<tag>` points at the packaged adapter; `artifact/promote` asks for its own

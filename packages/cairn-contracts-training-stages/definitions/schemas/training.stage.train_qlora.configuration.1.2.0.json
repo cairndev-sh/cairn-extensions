@@ -284,7 +284,7 @@
     "baseline_eval": {
       "type": "boolean",
       "default": false,
-      "description": "Evaluate once before the first step on the evaluation data and report baseline_eval_loss: the base model's loss, since a fresh LoRA adapter is a no-op. Skipped on a resumed run."
+      "description": "Report baseline_eval_loss: the base model's loss on the evaluation data, measured after training with the adapter disabled (the same rows and trainer as the candidate's eval_loss)."
     }
   },
   "additionalProperties": false

@@ -53,6 +53,24 @@ _RESULT_FILE = "train_result.json"
 # before the kernel OOM-killed it 45 minutes in. ~7 bytes/param covers
 # weights + LoRA grads/optimizer + activations for the CPU path.
 _TRAIN_BYTES_PER_PARAM = 7.0
+# cairn-extensions#7 — on a CUDA box the trainer is the Unsloth GPU path: the weights live in
+# VRAM, and host RAM holds the process, the tokenizer and the data. Measured on a g4dn.xlarge
+# (T4, 15 GiB RAM): Qwen3-4B-Base 4-bit QLoRA peaked at 2.3 GiB RSS over a full epoch (0.58
+# B/param), where the CPU rate refused it for an estimated 26.1 GiB. 1.0 B/param keeps ~70 %
+# headroom over that measurement.
+_GPU_TRAIN_BYTES_PER_PARAM = 1.0
+
+
+def _host_bytes_per_param(config: dict) -> float:
+    """The host-RAM rate for the path this train will take: the GPU path when a CUDA device is
+    there and the run is not a CPU validation (the same routing ``LocalTrainOp`` applies)."""
+    if config.get("validate_pipeline") or os.environ.get("CAIRN_TRAIN_VALIDATE"):
+        return _TRAIN_BYTES_PER_PARAM
+    try:
+        import torch  # noqa: PLC0415 - a cheap cuda probe; absent on a CPU-only control plane
+        return _GPU_TRAIN_BYTES_PER_PARAM if torch.cuda.is_available() else _TRAIN_BYTES_PER_PARAM
+    except Exception:  # noqa: BLE001 — no torch / probe failure ⇒ the CPU path's rate
+        return _TRAIN_BYTES_PER_PARAM
 
 
 def _param_count_from_name(base_model: str) -> float | None:
@@ -86,12 +104,14 @@ def _refuse_if_ram_infeasible(base_model: str, config: dict) -> None:
     avail = _available_ram_bytes()
     if params is None or avail is None:
         return
-    need = params * _TRAIN_BYTES_PER_PARAM
+    rate = _host_bytes_per_param(config)
+    need = params * rate
     if need > avail:
+        path = "GPU path" if rate == _GPU_TRAIN_BYTES_PER_PARAM else "CPU path, calibrated on the live #1322 OOM"
         raise RuntimeError(
             f"train.qlora refused before starting: {base_model} needs an "
-            f"estimated {need / 2**30:.1f} GiB RSS (~{_TRAIN_BYTES_PER_PARAM:.0f} B/param, "
-            f"calibrated on the live #1322 OOM) but only {avail / 2**30:.1f} GiB is "
+            f"estimated {need / 2**30:.1f} GiB RSS (~{rate:.1f} B/param, {path}) "
+            f"but only {avail / 2**30:.1f} GiB is "
             f"free — the kernel OOM-killer would end this run mid-train. "
             f"Use a smaller base model / bigger box, or set ignore_ram_check: true "
             f"to proceed anyway (swap may absorb it, slowly).")
@@ -443,7 +463,7 @@ for _fn in (sample_fidelity, eval_checkpoints, package_adapter):
     _fn.implements = (f"contract://training.stage.{_fn.__name__}/1.0.0",)
 # cairn-extensions#4 / #7 — train.qlora implements 1.2.0: the governed splits (train/eval/test URIs)
 # and the batch, accumulation, checkpointing and dropout knobs (1.1.0; `extra` is not
-# configuration), and baseline_eval, the base model's eval loss before the first step (1.2.0).
+# configuration), and baseline_eval, the base model's eval loss with the adapter disabled (1.2.0).
 train_qlora.implements = ("contract://training.stage.train_qlora/1.2.0",)
 
 

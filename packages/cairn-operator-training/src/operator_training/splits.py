@@ -56,24 +56,31 @@ def batch_args(spec: Any, *, per_device: int, accumulation: int) -> dict[str, in
     }
 
 
-def baseline(spec: Any, evaluate: Callable[[], dict], *, has_eval: bool, resumed: bool) -> dict[str, Any]:
-    """cairn-extensions#7 — with ``baseline_eval``, the evaluation loss BEFORE the first step.
+def baseline(spec: Any, evaluate_base: Callable[[], dict], *, has_eval: bool) -> dict[str, Any]:
+    """cairn-extensions#7 — with ``baseline_eval``, the BASE model's loss on the evaluation data:
+    the number the candidate's final ``eval_loss`` is compared with.
 
-    A fresh LoRA adapter starts as a no-op (its B matrix is zero), so this is the base model's
-    loss on the evaluation data: the number the candidate's final ``eval_loss`` is compared with.
-    Skipped, and the reason recorded, when there is no evaluation data or the run resumed from a
-    checkpoint (it would measure a half-trained adapter, not the base model). Call it after the
-    trainer is built and before ``train()``."""
+    ``evaluate_base`` evaluates with the adapter disabled (``evaluate_with_adapter_disabled``),
+    after training: the same rows, the same trainer, the base model's weights. Evaluating before
+    ``train()`` instead broke the fp16 path on a T4 ("Attempting to unscale FP16 gradients", the
+    first GPU run of Qwen3-4B-Base), and could not measure a run that resumed from a checkpoint.
+    Skipped, with the reason recorded, when there is no evaluation data."""
     if not _get(spec, "baseline_eval", False):
         return {}
     if not has_eval:
         return {"baseline_skipped": "no evaluation data"}
-    if resumed:
-        return {"baseline_skipped": "resumed from a checkpoint"}
-    loss = evaluate().get("eval_loss")
+    result = evaluate_base()
+    loss = result.get("baseline_loss", result.get("eval_loss"))
     if not isinstance(loss, (int, float)):
         return {"baseline_skipped": "the evaluation reported no eval_loss"}
     return {"baseline_eval_loss": float(loss)}
+
+
+def evaluate_with_adapter_disabled(model: Any, trainer: Any) -> dict:
+    """The trainer's evaluation with the LoRA adapter switched off — the base model (PEFT's
+    ``disable_adapter``), logged under the ``baseline`` prefix (``baseline_loss``)."""
+    with model.disable_adapter():
+        return trainer.evaluate(metric_key_prefix="baseline")
 
 
 def recorded(spec: Any, batch: dict[str, int], eval_source: str) -> dict[str, Any]:
@@ -88,4 +95,4 @@ def recorded(spec: Any, batch: dict[str, int], eval_source: str) -> dict[str, An
     return out
 
 
-__all__ = ["baseline", "batch_args", "recorded", "train_and_eval", "train_source"]
+__all__ = ["baseline", "batch_args", "evaluate_with_adapter_disabled", "recorded", "train_and_eval", "train_source"]
