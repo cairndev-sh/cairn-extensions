@@ -67,7 +67,7 @@ validator (cairn-extensions#12).
 
 | Path | Status | Evidence | Proven on `cairndev` |
 |---|---|---|---|
-| `prepare` on the builtin data engine, local store | EXPERIMENTAL | `tests/test_prepare.py`: the pack's flow, the core runner and registration in process, on the 200-row sample | 0.1.5 pre-release (local) |
+| `prepare` on the builtin data engine, local store | EXPERIMENTAL | `tests/test_prepare.py`: the pack's flow, the core runner and registration in process, on the 200-row sample | 0.2.0 pre-release (local) |
 | `prepare` on a Hub source with `revision`, through `cairn remote launch` | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

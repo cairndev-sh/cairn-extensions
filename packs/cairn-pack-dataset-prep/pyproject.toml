@@ -16,7 +16,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "cairn maintainers"}]
 dependencies = [
-    "cairndev>=0.1.5,<0.2",
+    "cairndev>=0.2.0,<0.3",
     # The kernels the flow names (ingest.normalize 1.2.0, fields.derive, profile.fields,
     # profile.tokens 1.1.0, split 1.0.0 with export, dataset.manifest).
     "cairn-operator-dataset-checks>=0.1,<0.2",
