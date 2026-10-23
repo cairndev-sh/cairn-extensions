@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.ingest_normalize",
+  "revision": "1.2.0",
+  "summary": "`ingest.normalize` — Materialize the working dataset: stream the source to current.jsonl, quarantining malformed lines. 1.2.0: a Hub source is loaded at `revision`; the stats record the revision, its commit, the fetch time and a snapshot hash of what was materialised.",
+  "configuration": "contract://dataset.stage.ingest_normalize.configuration/1.1.0",
+  "output": "contract://dataset.stage.ingest_normalize.output/1.2.0"
+}

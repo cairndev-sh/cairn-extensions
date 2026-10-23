@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.ingest_normalize.output/1.2.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows written to the working dataset."
+    },
+    "source": {
+      "type": "string",
+      "description": "What was read: the lineage parent."
+    },
+    "source_hash": {
+      "type": "string",
+      "description": "sha256 of the local bytes read, when the source is a local file (the upstream export's registry id, #1432). Absent for any other source."
+    },
+    "source_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size of the local bytes read."
+    },
+    "quarantined_rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Malformed source lines quarantined (#1008); the intake verdict reads it — any nonzero count is invalid_format (ADR-0102 D1, #2396)."
+    },
+    "snapshot_hash": {
+      "type": "string",
+      "description": "sha256 of the working dataset as materialised, for every source: one Hub revision always gives the same value, a moved branch a new one. Not a lineage id."
+    },
+    "revision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The Hub revision the source was loaded at; null for a source that is not a Hub id or when none was asked for."
+    },
+    "revision_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit that revision resolved to, looked up after the load (best effort; null offline)."
+    },
+    "fetched_at": {
+      "type": "string",
+      "description": "UTC time the read started (ISO 8601)."
+    }
+  },
+  "required": [
+    "rows",
+    "source",
+    "quarantined_rows",
+    "snapshot_hash",
+    "revision",
+    "revision_sha",
+    "fetched_at"
+  ]
+}

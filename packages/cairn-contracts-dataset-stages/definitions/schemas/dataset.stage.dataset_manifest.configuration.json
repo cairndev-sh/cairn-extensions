@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dataset_manifest.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": "manifest.json",
+      "description": "File name of the manifest."
+    },
+    "store": {
+      "type": "string",
+      "description": "local or s3; unset = the environment's artifact store."
+    },
+    "root": {
+      "type": "string",
+      "description": "s3 key root override."
+    }
+  },
+  "additionalProperties": false
+}

@@ -2,7 +2,7 @@ format = "cairn.contracts/1"
 
 [distribution]
 name = "cairn-contracts-dataset-stages"
-version = "1.1.0"
+version = "1.2.0"
 
 [[definitions]]
 id = "dataset.stage.decontam_apply"
@@ -189,3 +189,48 @@ id = "dataset.stage.export_jsonl.output"
 revision = "1.1.0"
 kind = "schema"
 path = "schemas/dataset.stage.export_jsonl.output.1.1.0.json"
+
+# cairn-extensions#5 — a hub source loaded at a pinned revision (ingest.normalize 1.2.0, new
+# configuration and output revisions) and the bundled manifest (dataset.manifest).
+# Every earlier file above is unchanged.
+[[definitions]]
+id = "dataset.stage.ingest_normalize"
+revision = "1.2.0"
+kind = "stage"
+path = "stages/dataset.stage.ingest_normalize.1.2.0.json"
+
+[[definitions]]
+id = "dataset.stage.ingest_normalize.configuration"
+revision = "1.1.0"
+kind = "schema"
+path = "schemas/dataset.stage.ingest_normalize.configuration.1.1.0.json"
+
+[[definitions]]
+id = "dataset.stage.ingest_normalize.output"
+revision = "1.2.0"
+kind = "schema"
+path = "schemas/dataset.stage.ingest_normalize.output.1.2.0.json"
+
+[[definitions]]
+id = "dataset.stage.dataset_manifest"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/dataset.stage.dataset_manifest.json"
+
+[[definitions]]
+id = "dataset.stage.dataset_manifest.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.dataset_manifest.configuration.json"
+
+[[definitions]]
+id = "dataset.stage.dataset_manifest.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.dataset_manifest.output.json"
+
+[[definitions]]
+id = "dataset.manifest.document"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.manifest.document.json"

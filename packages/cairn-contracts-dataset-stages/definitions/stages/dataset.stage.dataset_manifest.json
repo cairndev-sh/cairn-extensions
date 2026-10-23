@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.dataset_manifest",
+  "revision": "1.0.0",
+  "summary": "`dataset.manifest` (kernel `dataset_manifest`) — one manifest.json for the working dataset: source, revision, hashes, row count, field names, licence and citation from the hub card (null when absent), fetch time. Never row content.",
+  "configuration": "contract://dataset.stage.dataset_manifest.configuration/1.0.0",
+  "output": "contract://dataset.stage.dataset_manifest.output/1.0.0"
+}

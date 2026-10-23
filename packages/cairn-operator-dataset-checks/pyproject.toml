@@ -25,7 +25,7 @@ dependencies = [
     # `[compat]`) and the two contract wheels it implements, pinned exactly.
     "cairndev>=0.2.0,<0.3",
     "cairn-contracts-dataset==1.2.0",
-    "cairn-contracts-dataset-stages==1.1.0",
+    "cairn-contracts-dataset-stages==1.2.0",
 ]
 
 [project.urls]
@@ -143,6 +143,8 @@ split = ["scikit-learn>=1.0"]
 "split" = "operator_dataset_checks.dataflow_stages:split"
 "scan.all" = "operator_dataset_checks.dataflow_stages:scan_all"
 "filter.rows" = "operator_dataset_checks.dataflow_stages:filter_rows"
+# cairn-extensions#5 — the bundled manifest of the working dataset.
+"dataset.manifest" = "operator_dataset_checks.dataflow_stages:dataset_manifest"
 
 # #2022 — the Add-dataset preview reads a bounded sample of any source this
 # pack can read (JSON/JSONL/CSV/Parquet, Hub ids, s3). Core resolves the reader
