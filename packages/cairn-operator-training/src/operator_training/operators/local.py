@@ -124,20 +124,21 @@ def _use_gpu_unsloth(spec: TrainSpec) -> bool:
     if _validating(spec):
         return False
     try:
-        import torch  # noqa: PLC0415 — base dep; a cheap cuda probe
+        import torch  # noqa: PLC0415 — the [local]/[gpu] extra; a cheap cuda probe
         return bool(torch.cuda.is_available())
     except Exception:  # noqa: BLE001 — no torch / probe failure ⇒ CPU path
         return False
 
 
-def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None) -> TrainResult:
+def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None, out_dir: str | None = None) -> TrainResult:
     """Hand a real GPU run to the unsloth engine (``train_entry.main``) and wrap its
     result as a ``TrainResult``. ``adapter_uri`` is forced to the LOCAL dir
-    ``train_entry`` always writes (``save_pretrained`` → ``/tmp/<output_name>``) so the
-    SSH governed path can SFTP-fetch the adapter back regardless of any HF/S3 push the
-    spec also requested. unsloth is a GPU-only optional dep, imported lazily inside
-    ``train_entry`` — a GPU box without it fails loud ('No module named unsloth'),
-    which is the honest signal to install it, not a silent CPU fallback.
+    ``train_entry`` writes (``save_pretrained`` → ``out_dir``, which
+    :func:`checkpoint_sync.trainer_output_dir` names) so the caller publishes it to its
+    real ``artifact_target`` regardless of any HF/S3 push the spec also requested.
+    unsloth is a GPU-only optional dep, imported lazily inside ``train_entry`` — a GPU box
+    without it fails loud ('No module named unsloth'), which is the honest signal to install
+    it, not a silent CPU fallback.
 
     NOTE (#553 gap): this path publishes metrics only at completion — it does not
     stream a live loss curve into metrics.json the way the CPU path does (train_entry
@@ -149,8 +150,9 @@ def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None) -> TrainResult:
     # on the SSH path the single publish point is local_entry (which honors the real
     # artifact_target after training), so this avoids a double-push. train_entry run as its
     # own entrypoint still pushes with the real target.
-    result = _gpu_main({**spec.model_dump(), "artifact_target": "local"}, reporter=reporter)
-    local_dir = f"/tmp/{spec.output_name}"  # train_entry.main's save_pretrained target
+    local_dir = out_dir or checkpoint_sync.trainer_output_dir(spec.output_name)
+    result = _gpu_main({**spec.model_dump(), "artifact_target": "local"}, reporter=reporter,
+                       output_dir=local_dir)
     return TrainResult(
         status="succeeded",
         backend="unsloth-gpu",
@@ -169,7 +171,7 @@ def _stage(reporter: Any, name: str) -> None:
 
 
 async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
-                       reporter: Any = None) -> TrainResult:
+                       reporter: Any = None, output_dir: str | None = None) -> TrainResult:
     """Run a real LoRA SFT and return real metrics + adapter. On a CUDA GPU this hands
     off to the unsloth 4-bit QLoRA engine (#6); on CPU/MPS (incl. validation mode) it
     runs the hermetic plain-LoRA path below.
@@ -177,9 +179,13 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     ``reporter`` (#2025) is the run's typed reporter — ``ctx.report`` in-process,
     a :class:`operator_training.live.LiveReporter` on a box — and receives the
     stages, the loss/eval curve, checkpoints and the final scalars through
-    :func:`operator_training.reporting.make_report_callback`."""
+    :func:`operator_training.reporting.make_report_callback`.
+
+    ``output_dir`` is where checkpoints and the adapter go; unset = ``/tmp/<output_name>``
+    (:func:`checkpoint_sync.trainer_output_dir`)."""
+    out_dir = output_dir or checkpoint_sync.trainer_output_dir(spec.output_name)
     if _use_gpu_unsloth(spec):
-        return _train_gpu_unsloth(spec, reporter)
+        return _train_gpu_unsloth(spec, reporter, out_dir)
     _require_local()
     import inspect  # noqa: PLC0415
 
@@ -190,7 +196,6 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
     device = _device()
-    out_dir = f"/tmp/{spec.output_name}"
     _stage(reporter, "download")
     os.makedirs(out_dir, exist_ok=True)
     # ADR-0064 §1/§2: pull any durable S3 checkpoint down BEFORE training starts,
@@ -394,7 +399,11 @@ class LocalTrainOp(Operation[TrainSpec, TrainResult]):
     reports = TRAIN_REPORTS  # ADR-0103 / #2025
 
     async def run(self, inp: TrainSpec, ctx: OperationContext) -> TrainResult:
-        return await _train_local(inp, reporter=ctx.report)
+        # A flow stage's context carries the job's workdir (flow_stages._Ctx): the trainer
+        # writes under it, so its checkpoints live and die with the job. No workdir (the
+        # in-process operator) = /tmp/<output_name>, as before.
+        out_dir = checkpoint_sync.trainer_output_dir(inp.output_name, getattr(ctx, "workdir", None))
+        return await _train_local(inp, reporter=ctx.report, output_dir=out_dir)
 
     def mock(self, inp: TrainSpec, ctx: OperationContext) -> TrainResult:
         return TrainResult(

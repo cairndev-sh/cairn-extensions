@@ -28,6 +28,9 @@ Source = "https://github.com/cairndev-sh/cairn-extensions"
 Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
 
 [project.optional-dependencies]
+# MLflow tracking (`report_to: [mlflow]`). Not in `[gpu]`: a box that tracks installs
+# `[gpu,track-mlflow]`; without it a run asked to report to mlflow trains untracked and
+# records why (`tracking_error`).
 track-mlflow = ["mlflow>=2.14"]
 # test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
 test = ["moto[s3]>=5", "huggingface_hub>=0.20", "pyyaml>=6"]
@@ -41,8 +44,11 @@ test = ["moto[s3]>=5", "huggingface_hub>=0.20", "pyyaml>=6"]
 local = ["torch>=2.11,<2.12", "transformers>=5.5,<5.6", "peft>=0.20,<0.21", "trl>=0.24,<0.25", "datasets>=4.3,<4.4", "accelerate>=1.14,<2"]
 # gpu — the Unsloth QLoRA trainer on a CUDA box (the ssh engine's venv mode): EXACTLY
 # images.py::TRAINER_PINS, `==` each, so a box installed from this extra runs the same
-# trainer environment every time. tests/test_trainer_pins.py holds the two equal.
-gpu = ["torch==2.11.0", "unsloth==2026.8.21", "unsloth_zoo==2026.8.15", "trl==0.24.0", "peft==0.20.0", "transformers==5.5.0", "datasets==4.3.0", "bitsandbytes==0.50.1", "accelerate==1.14.0"]
+# trainer environment every time, plus boto3, the S3 client the box uses for s3:// data,
+# checkpoint mirroring (CAIRN_CHECKPOINT_BUCKET) and `artifact_target: s3`. boto3 is
+# imported only on those paths (checkpoint_sync.s3_client). tests/test_trainer_pins.py
+# holds the pins equal.
+gpu = ["torch==2.11.0", "unsloth==2026.8.21", "unsloth_zoo==2026.8.15", "trl==0.24.0", "peft==0.20.0", "transformers==5.5.0", "datasets==4.3.0", "bitsandbytes==0.50.1", "accelerate==1.14.0", "boto3>=1.34"]
 
 # On-box trainer CLI for the train/remote path: `remote/exec` SSH-dispatches this
 # to a box that has `cairn-operator-training[local]` installed (the box does the torch

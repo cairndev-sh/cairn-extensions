@@ -37,8 +37,9 @@ def test_gpu_dispatch_wraps_unsloth_result(monkeypatch):
 
     called = {}
 
-    def fake_main(spec_dict, reporter=None):
+    def fake_main(spec_dict, reporter=None, *, output_dir=None):
         called["spec"] = spec_dict
+        called["output_dir"] = output_dir
         return {"adapter_uri": "hf://acme/out", "metrics": {"train_loss": 0.7, "eval_loss": 0.9}}
 
     import operator_training.train_entry as te
@@ -51,6 +52,6 @@ def test_gpu_dispatch_wraps_unsloth_result(monkeypatch):
     # …metrics threaded through, backend tagged unsloth-gpu.
     assert res.backend == "unsloth-gpu"
     assert res.metrics["eval_loss"] == 0.9
-    # adapter_uri forced to the LOCAL dir train_entry writes (so SFTP-fetch works),
-    # NOT the hf:// push target.
-    assert res.adapter_uri == "/tmp/out"
+    # adapter_uri forced to the LOCAL dir train_entry writes (the caller publishes it),
+    # NOT the hf:// push target. No job workdir here, so /tmp/<output_name>.
+    assert res.adapter_uri == called["output_dir"] == "/tmp/out"

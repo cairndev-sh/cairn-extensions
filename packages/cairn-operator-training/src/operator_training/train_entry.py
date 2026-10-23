@@ -36,9 +36,14 @@ def _base_metrics(stats: Any) -> dict[str, Any]:
 
     ``trainer_env`` (#1622) is the env fingerprint — the versions this run
     actually trained on, next to the numbers they produced.
+
+    ``steps`` is the optimizer steps the run took (``TrainOutput.global_step``), the
+    figure ``train.qlora`` reports and the ``promote-model`` gate shows; the CPU
+    path (``operators/local``) reports the same key.
     """
     metrics: dict[str, Any] = {
         "train_loss": float(getattr(stats, "training_loss", 0.0) or 0.0),
+        "steps": int(getattr(stats, "global_step", 0) or 0),
         "trainer_env": trainer_env(),
     }
     for key in ("train_runtime", "train_samples_per_second", "train_steps_per_second",
@@ -137,9 +142,12 @@ def _save_adapter(spec: dict[str, Any], model: Any, tokenizer: Any, out_dir: str
     if target == "s3":
         checkpoint_target = checkpoint_sync.s3_target_from_env()
         if checkpoint_target is not None:
+            from operator_training.publish import adapter_files  # noqa: PLC0415 - stdlib helper
+
             bucket, prefix, run_key = checkpoint_target
             key_prefix = f"{prefix}/{run_key}/adapter"
-            checkpoint_sync.upload_dir(out_dir, bucket, key_prefix)
+            # the adapter only: out_dir also holds checkpoint-*/ (optimizer state)
+            checkpoint_sync.upload_files(out_dir, adapter_files(out_dir), bucket, key_prefix)
             return f"s3://{bucket}/{key_prefix}/"
         # No checkpoint bucket configured — fall back to the local dir (best-effort).
         return out_dir
@@ -173,7 +181,8 @@ def _preflight_mlflow() -> str:
         mlflow.MlflowClient().search_experiments(max_results=1)
         return ""
     except ImportError:
-        return "mlflow not installed on this box"
+        return ("mlflow is not installed on this box: install "
+                "'cairn-operator-training[gpu,track-mlflow]' to report to mlflow")
     except Exception as e:  # noqa: BLE001 — ANY probe failure means: train without tracking
         return f"{type(e).__name__}: {e}"
     finally:
@@ -320,17 +329,19 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
         return {"mlflow_run_id": run_id, "mlflow_register_error": f"{type(e).__name__}: {e}"}
 
 
-def main(spec: dict[str, Any], reporter: Any = None) -> dict[str, Any]:
+def main(spec: dict[str, Any], reporter: Any = None, *, output_dir: str | None = None) -> dict[str, Any]:
     # #2025: the live channel — the reporter a caller hands in (the SSH path's
     # local_entry, the in-process operator) or the one the environment / the
     # `_live_env` a submit tucked into the spec describes (a container entrypoint).
+    # `output_dir`: where checkpoints and the adapter go — a flow stage passes one under its
+    # job workdir (checkpoint_sync.trainer_output_dir); unset = /tmp/<output_name>.
     from operator_training.reporting import make_report_callback, reporter_for  # noqa: PLC0415 — keeps `import train_entry` light for the submitters
 
     spec = dict(spec)
     live_env = spec.pop("_live_env", None)
     reporter = reporter if reporter is not None else reporter_for({"_live_env": live_env} if live_env else None)
     try:
-        return _main(spec, reporter, make_report_callback)
+        return _main(spec, reporter, make_report_callback, output_dir)
     finally:
         close = getattr(reporter, "close", None)
         if callable(close):
@@ -347,7 +358,8 @@ def _stage(reporter: Any, name: str) -> None:
         pass
 
 
-def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dict[str, Any]:
+def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any,
+          output_dir: str | None = None) -> dict[str, Any]:
     # Deferred heavy imports — only available on the GPU backend image.
     # unsloth MUST be imported before trl/transformers/peft: it patches them
     # (SFTConfig/SFTTrainer included). Importing trl first leaves a half-patched
@@ -361,7 +373,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # #1709 — resolve + PREFLIGHT tracking before any heavy work: an unreachable
     # sink is dropped here (with the reason kept for the metrics), never fatal.
     _report_to, _tracking_error = _tracking_setup(spec)
-    out_dir = f"/tmp/{spec.get('output_name', 'adapter')}"
+    out_dir = output_dir or checkpoint_sync.trainer_output_dir(spec.get("output_name", "adapter"))
     _stage(reporter, "download")
     # ADR-0064 §1/§2: pull any durable S3 checkpoint down BEFORE training starts,
     # so a relaunch on a fresh box resumes via resume_from_checkpoint. No-op if no
@@ -373,8 +385,8 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # #1714 — route through the pack's OWN resolver instead of handing the raw
     # spec value to `datasets`: it strips the `#sha256=` pin a launch-resolved
     # `dataset:` ref carries (fsspec treats the fragment as part of the object
-    # key → FileNotFoundError), fetches s3:// via boto3 (a base dep, rather than
-    # relying on s3fs being present on the box), and VERIFIES the bytes against
+    # key → FileNotFoundError), fetches s3:// via boto3 (the `[gpu]` extra, imported
+    # only for an s3:// URI; not s3fs), and VERIFIES the bytes against
     # the pin. This entry had bypassed `dataset_fetch` entirely, which is why the
     # retrieval rule was decorative on the GPU path.
     # cairn-extensions#4: the training data is `train_uri` when set (else `dataset_uri`), and a

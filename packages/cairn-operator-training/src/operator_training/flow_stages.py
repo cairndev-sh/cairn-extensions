@@ -38,13 +38,16 @@ class _Ctx:
     the dataset_checks kernels): kernels run engine-side with no graph.
     ``report`` (#2025) is the stage's :class:`~operator_training.live.LiveReporter`,
     built from the env the flow engine handed this process — the same surface
-    the operator bodies call as ``ctx.report``."""
+    the operator bodies call as ``ctx.report``. ``workdir`` is the job's working
+    directory, where ``train/local`` writes the trainer's output
+    (``checkpoint_sync.trainer_output_dir``)."""
     pipeline_id = "ml-flow-stage"
     node_name = "kernel"
     compute = None
 
-    def __init__(self, report: Any = None) -> None:
+    def __init__(self, report: Any = None, workdir: Path | None = None) -> None:
         self.report = report if report is not None else live.NullReporter()
+        self.workdir = workdir
 
 
 _RESULT_FILE = "train_result.json"
@@ -259,7 +262,7 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
         op = LocalTrainOp()
     reporter = live.reporter_from_env(node="train.qlora")  # #2025: the live curve, as this stage
     try:
-        res = asyncio.run(op.run(spec, _Ctx(reporter)))
+        res = asyncio.run(op.run(spec, _Ctx(reporter, workdir=workdir)))
     finally:
         reporter.close()
     if res.status != "succeeded":
