@@ -125,7 +125,7 @@ steps:
       fidelity_rows: $input.smoke_rows
       max_steps: $input.smoke_steps
       # Its own adapter name: the full run must never resume from the smoke run's checkpoints
-      # (it would skip the baseline and carry the smoke steps). Each leg is its own run with its
+      # (it would carry the smoke steps). Each leg is its own run with its
       # own workdir and checkpoint key, so the name keeps the two adapters apart on the record.
       output_name: $input.smoke_output_name
 

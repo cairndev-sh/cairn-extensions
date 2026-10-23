@@ -90,7 +90,10 @@ def test_the_ssh_engine_accepts_the_sft_train_flow(monkeypatch):
     "AWS_DEFAULT_REGION",
     "CAIRN_ARTIFACT_S3_BUCKET",
     "MLFLOW_TRACKING_URI",
+    "cairndev 0.2.1, cancel and the engine's stage-checkpoint relay",
     "SSH_PRIVATE_KEY",
+    "AWS_ENDPOINT_URL",
+    "read access",
     "--secret PRIVATE_KEY=",
     "Venv mode only",
 ])

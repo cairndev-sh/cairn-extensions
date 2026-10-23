@@ -48,7 +48,7 @@ loss is not below its baseline, so `improved` stops it.
 pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # the control plane: no torch
 pip install 'cairn-operator-training[gpu]'            # on the GPU box (add ,track-mlflow for MLflow)
 export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"        # in the engine's environment
-export SSH_PRIVATE_KEY="$GPU_SSH_KEY"                # cancel and the checkpoint pull-back read this one
+export SSH_PRIVATE_KEY="$GPU_SSH_KEY"                # cairndev 0.2.1: cancel and the stage-checkpoint relay read this
 cairn connect add ssh --name gpu --set host=<box> --set user=<user> --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
 export CAIRN_PROFILE=<site-packages>/cairn_pack_finetune/profiles/finetune-ssh.toml
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch   # once
@@ -62,8 +62,9 @@ setting; in short:
   store (`CAIRN_ARTIFACT_S3_BUCKET`, on the control plane), and the IFC preset publishes the
   adapter with `artifact_target: s3` (`CAIRN_CHECKPOINT_BUCKET`, which also mirrors checkpoints).
   The trainer reads `CAIRN_CHECKPOINT_BUCKET`, `CAIRN_CHECKPOINT_PREFIX` and `AWS_DEFAULT_REGION`
-  on the box: set them there, or forward them from the control plane with `remote_env`
-  (cairndev 0.2.2 and later).
+  (and `AWS_ENDPOINT_URL` for MinIO) on the box: set them there. Forwarding them from the control
+  plane with a `remote_env` backend is planned (cairndev-sh/cairn#193). The box's credentials need
+  read access to the artifact bucket, where the dataset versions live.
 - **The box** runs the trainer in its own virtualenv (no published image carries this trainer
   yet), installs the same `cairn-contracts-training*` versions as the control plane, and has
   `cairn-dataflow-run` on its SSH `PATH` (or set `CAIRN_DATAFLOW_REMOTE_CMD`).

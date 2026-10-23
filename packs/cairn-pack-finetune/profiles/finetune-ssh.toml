@@ -6,7 +6,7 @@
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
 #     export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"     # in the engine's environment
-#     export SSH_PRIVATE_KEY="$GPU_SSH_KEY"             # cancel and the checkpoint pull-back read this one
+#     export SSH_PRIVATE_KEY="$GPU_SSH_KEY"             # see "SSH key" below
 #     cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
 #         --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
 #     export CAIRN_ARTIFACT_S3_BUCKET=<bucket>          # the registered versions (CAIRN_ARTIFACT_S3_PREFIX optional)
@@ -22,14 +22,23 @@
 #     profile pins `remote_exec_mode = "venv"` (the box's own virtualenv, not a container).
 #   * `cairn-dataflow-run` must be on the box's non-interactive SSH PATH; otherwise set
 #     CAIRN_DATAFLOW_REMOTE_CMD on the control plane to its full path (e.g. <venv>/bin/cairn-dataflow-run).
+#   * SSH key: with cairndev 0.2.1, cancel and the engine's stage-checkpoint relay (the pull of
+#     the leg's `checkpoints/stage-*` back to the control plane) read SSH_PRIVATE_KEY from the
+#     control plane's environment, not the connection's PRIVATE_KEY; later versions use the
+#     connection's PRIVATE_KEY. This is not the trainer's own checkpoints, which go to S3 (below).
+#   * The box reads the dataset versions from the artifact bucket (CAIRN_ARTIFACT_S3_BUCKET), so
+#     its credentials (e.g. an instance role) need read access there, and write access to
+#     CAIRN_CHECKPOINT_BUCKET.
 #   * The trainer reads CAIRN_CHECKPOINT_BUCKET (checkpoints and the `artifact_target: s3`
-#     adapter), CAIRN_CHECKPOINT_PREFIX and AWS_DEFAULT_REGION where it runs. Either way works:
-#     set them on the GPU box, or, from cairndev 0.2.2 on, have the SSH engine forward them from
-#     the control plane by name, with `remote_env` in [profile.backends] (or CAIRN_REMOTE_ENV):
-#         remote_env = "CAIRN_CHECKPOINT_BUCKET,CAIRN_CHECKPOINT_PREFIX,AWS_DEFAULT_REGION"
-#     Names containing KEY, SECRET, TOKEN or PASSWORD are never forwarded, so AWS credentials
-#     stay on the box (an instance role). MLFLOW_TRACKING_URI, set on the control plane, is
-#     forwarded and turns on `report_to: [mlflow]`; the box must reach that URI.
+#     adapter), CAIRN_CHECKPOINT_PREFIX and AWS_DEFAULT_REGION where it runs; for MinIO or
+#     another S3-compatible store it reads AWS_ENDPOINT_URL (not CAIRN_ARTIFACT_S3_ENDPOINT).
+#     Set them on the GPU box. Planned (cairndev-sh/cairn#193, not released): a `remote_env`
+#     backend (or CAIRN_REMOTE_ENV) naming variables the SSH engine forwards from the control
+#     plane, e.g. remote_env = "CAIRN_CHECKPOINT_BUCKET,CAIRN_CHECKPOINT_PREFIX,AWS_DEFAULT_REGION";
+#     it refuses names containing KEY, SECRET, TOKEN or PASSWORD, so credentials stay on the box.
+#   * MLFLOW_TRACKING_URI (and MLFLOW_TRACKING_USERNAME / _PASSWORD, MLFLOW_EXPERIMENT_NAME), set
+#     on the control plane, are forwarded by the engine itself and turn on `report_to: [mlflow]`;
+#     the box must reach that URI.
 #
 # Two machines need a store both can reach, so this profile selects the s3 artifact store: the
 # versions dataset-prep registers (it refuses to register from the local store) and the adapter
