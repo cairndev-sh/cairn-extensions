@@ -28,20 +28,20 @@ pip install 'cairn-operator-training[gpu]'   # a CUDA box the ssh engine runs th
 | `local` | Plain LoRA on CPU/MPS (no unsloth or bitsandbytes), ranges floored at the same pins. |
 | `track-mlflow` | MLflow run, dataset and model logging (`report_to: [mlflow]`). |
 
-The base install pins `cairndev>=0.1.5,<0.2` and the two contract wheels exactly. Check an
+The base install pins `cairndev>=0.2.0,<0.3` and the two contract wheels exactly. Check an
 install with `cairn doctor` and `cairn pack check`.
 
 ## Support
 
 Carried from cairn's support matrix as it stood at `cairndev` 0.1.3, when this pack was
 private. **No row has been re-proven on this public wheel yet**: the first proof is the
-qualification run in cairndev-sh/cairn-extensions#9 (an ssh GPU box, `cairndev` 0.1.5), and
+qualification run in cairndev-sh/cairn-extensions#9 (an ssh GPU box, `cairndev` 0.2.0), and
 each row will name the `cairndev` release it was proven on as it is re-run.
 
 | Path | Status | Evidence so far | Proven on `cairndev` |
 |---|---|---|---|
 | SFT with LoRA / QLoRA on an ssh GPU box (`ml_target` = a `compute.ssh` connection) | SUPPORTED | 2026-08-28 GPU campaign, before the public 0.1 releases | not yet (#9) |
-| `stub: true` trainer tier | SUPPORTED | pack tests | 0.1.5 pre-release (local run; CI lands with #1) |
+| `stub: true` trainer tier | SUPPORTED | pack tests | 0.2.0 pre-release (local run; CI lands with #1) |
 | DPO (`train.dpo`) | EXPERIMENTAL | pack tests; no GPU run recorded | not yet |
 | Distillation (`compress/distill`, `train.distill`) | EXPERIMENTAL | pack tests; no GPU run recorded | not yet |
 
