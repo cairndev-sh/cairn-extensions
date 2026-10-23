@@ -23,7 +23,7 @@ dependencies = [
     "boto3>=1.34",
     # The engine range this pack is proven on (ADR-0128 D3: bounded, the same range as
     # `[compat]`) and the two contract wheels it implements, pinned exactly.
-    "cairndev>=0.2.0,<0.3",
+    "cairndev>=0.2.1,<0.3",
     "cairn-contracts-dataset==1.2.0",
     "cairn-contracts-dataset-stages==1.3.0",
 ]
