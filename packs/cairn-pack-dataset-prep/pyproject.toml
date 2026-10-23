@@ -26,6 +26,8 @@ dependencies = [
 # Near-duplicate dedup (dedup.near is an honest skip without it) and the tokenizer that counts
 # lengths with the base model's own vocabulary (whitespace words without it).
 all = ["cairn-operator-dataset-checks[minhash,tokenizers]>=0.1,<0.2"]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
+test = ["moto[s3]>=5"]
 
 [project.urls]
 Homepage = "https://cairndev.sh"

@@ -5,7 +5,8 @@ this checkout), run by the core runner on the 200-row IFC-shaped sample with the
 `ifc-bim-alpaca` preset's rules, and registered through the leg's own registration path
 (`register_leg_descriptors`, which stamps each version's intake verdict). Then the holdout door
 runs on what was registered. Hermetic: a local file instead of the Hub, whitespace token counts,
-no minhash extra (near dedup is an honest skip), sqlite."""
+no minhash extra (near dedup is an honest skip), sqlite, and a moto-mocked S3 bucket for the
+exported files (the split registers its versions only from the s3 store, cairn-extensions#6)."""
 from __future__ import annotations
 
 import json
@@ -16,6 +17,25 @@ import yaml
 
 PACK = Path(__file__).resolve().parents[1]
 SAMPLE = PACK / "data" / "sample-ifc.jsonl"
+BUCKET = "cairn-test-artifacts"
+
+
+@pytest.fixture(autouse=True)
+def s3(monkeypatch):
+    """The s3 artifact store the exports land in, mocked."""
+    boto3 = pytest.importorskip("boto3")
+    moto = pytest.importorskip("moto")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+    monkeypatch.setenv("CAIRN_ARTIFACT_S3_BUCKET", BUCKET)
+    monkeypatch.setenv("CAIRN_ARTIFACT_S3_PREFIX", "datasets")
+    for name in ("CAIRN_ARTIFACT_S3_ENDPOINT", "OBS_ARTIFACT_S3_ENDPOINT", "OBS_ARTIFACT_S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+    with moto.mock_aws():
+        client = boto3.client("s3", region_name="eu-central-1")
+        client.create_bucket(Bucket=BUCKET, CreateBucketConfiguration={"LocationConstraint": "eu-central-1"})
+        yield client
 
 
 @pytest.fixture(autouse=True)
@@ -34,8 +54,8 @@ def _pack_from_checkout(monkeypatch):
 def _preset_config(**over) -> dict:
     doc = yaml.safe_load((PACK / "presets" / "ifc-bim-alpaca.yaml").read_text(encoding="utf-8"))
     (preset,) = [p for p in doc["presets"] if p["name"] == "ifc-bim-alpaca"]
-    # The sample instead of the Hub; no tokenizer download; files in the workdir.
-    return {**preset["inputs"], "path": str(SAMPLE), "revision": "", "base_model": "", "store": "local", **over}
+    # The sample instead of the Hub; no tokenizer download; the exports in the (mocked) s3 store.
+    return {**preset["inputs"], "path": str(SAMPLE), "revision": "", "base_model": "", "store": "s3", **over}
 
 
 def _prepare(workdir: Path, config: dict):
@@ -82,12 +102,20 @@ async def test_prepare_registers_three_versions_with_their_roles_and_verdicts(tm
     assert 24 - near <= topics["IFCWALLSTANDARDCASE"] <= 24 and topics["other"] == 2
     assert stats["split.no_leakage"] is True
     assert sum(d.rows for d in result.named_outputs) == 194 - near
+    assert all(d.uri.startswith(f"s3://{BUCKET}/datasets/dataflow/") for d in result.named_outputs)
 
 
-async def test_the_manifest_and_the_record_carry_no_row_content(tmp_path, store):
+def test_registering_from_the_local_store_is_refused(tmp_path):
+    """A version registered from a local split would name a file in the leg's temporary workdir."""
+    with pytest.raises(Exception, match="`register` needs `store: s3`"):
+        _prepare(tmp_path / "wd", _preset_config(store="local"))
+
+
+async def test_the_manifest_and_the_record_carry_no_row_content(tmp_path, store, s3):
     result = _prepare(tmp_path / "wd", _preset_config())
     stats = await _register(result, store)
-    manifest = json.loads(Path(stats["dataset.manifest.output"]).read_text(encoding="utf-8"))
+    _bucket, _, key = stats["dataset.manifest.output"].removeprefix("s3://").partition("/")
+    manifest = json.loads(s3.get_object(Bucket=_bucket, Key=key)["Body"].read())
     assert manifest["rows"] == 194 - stats["dedup.near.dropped_near"] and set(manifest["fields"]) == {"instruction", "input", "output", "topic", "family"}
     record = json.dumps(stats) + json.dumps(manifest)
     for text in ("shear wall", "IFCPROJECT(", "Industry Foundation Classes, an open"):

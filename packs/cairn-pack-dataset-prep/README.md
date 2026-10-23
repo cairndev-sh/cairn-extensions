@@ -51,8 +51,14 @@ cairn remote advance <pipeline-id> source-ok  # a person confirms the source
 
 Any dataset: `-i path=<hub id | file | s3://…> -i register=<name>`, plus `-i revision=<commit>`
 for a Hub source. Add `group_by`, `derive`, `topic_fields` and `group_fields` when the rows carry,
-or can be given, a group. On a remote engine set `store=s3`, so the control plane can read the
-versions it registers.
+or can be given, a group.
+
+**The versions live in S3.** Registering them needs the s3 artifact store: `-i store=s3`, or a
+profile with `artifact_store = "s3"` (as `cairn-pack-finetune`'s `finetune-ssh` has), plus
+`CAIRN_ARTIFACT_S3_BUCKET` (`CAIRN_ARTIFACT_S3_PREFIX` optional, `CAIRN_ARTIFACT_S3_ENDPOINT` for
+MinIO or another S3-compatible store). With the local store the split refuses to register:
+its files sit in the leg's temporary workdir, which a reboot deletes and another machine cannot
+read.
 
 ## Presets
 
@@ -67,7 +73,7 @@ validator (cairn-extensions#12).
 
 | Path | Status | Evidence | Proven on `cairndev` |
 |---|---|---|---|
-| `prepare` on the builtin data engine, local store | EXPERIMENTAL | `tests/test_prepare.py`: the pack's flow, the core runner and registration in process, on the 200-row sample | 0.2.1 pre-release (local) |
+| `prepare` on the builtin data engine, s3 store | EXPERIMENTAL | `tests/test_prepare.py`: the pack's flow, the core runner and registration in process, on the 200-row sample and a mocked S3 bucket | 0.2.1 pre-release (local) |
 | `prepare` on a Hub source with `revision`, through `cairn remote launch` | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

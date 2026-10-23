@@ -12,8 +12,10 @@
 # a blocked or invalid one is refused by the core's intake door either way, and the fine-tune
 # pack's admission checks each version's role and verdict.
 #
-# On a remote engine set `store: s3`: the `format` leg and the holdout door read the versions
-# on the control plane, which cannot open a file:// path on the engine's box.
+# The versions need the s3 store (`store: s3`, or a profile with `artifact_store = "s3"` and
+# CAIRN_ARTIFACT_S3_BUCKET): the split refuses to register from the local store, whose files sit
+# in the leg's temporary workdir, are deleted at a reboot, and cannot be read from another
+# machine (the `format` leg, the holdout door, a trainer on a GPU box).
 #
 # Nothing here writes row content into the record: stats, hashes, counts and version ids.
 name: prepare
@@ -47,7 +49,7 @@ inputs:
   base_model: {type: str, default: "", description: "The model to be trained; its tokenizer counts the lengths (whitespace words without one, said in the report)."}
   max_seq_len: {type: int, default: 0, description: "Training sequence length; longer examples are counted (0 = no limit)."}
   over_length: {type: str, default: "count", description: "count | drop | refuse for examples over max_seq_len. Never truncate."}
-  store: {type: str, default: "", description: "local or s3 for the exported files; empty = the environment's artifact store. A remote engine needs s3."}
+  store: {type: str, default: "", description: "s3 or local for the exported files; empty = the environment's artifact store. Registering the versions needs s3."}
 
 governance:
   budget: {usd: 1}
