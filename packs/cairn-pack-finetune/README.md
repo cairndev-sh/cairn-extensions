@@ -16,7 +16,7 @@ approve-run ⏸ → smoke → smoke-ok → train → improved → promote-model 
 
 - **Admission, at launch.** Before any record exists, cairn's launch door checks the three
   versions:
-  - each has the role its input declares (ADR-0142), so a test set given as training data, or a
+  - each has the role its input declares (ADR-0146), so a test set given as training data, or a
     path instead of a registered version, refuses the launch;
   - the train and val versions carry an intake verdict, and a blocked or invalid one refuses;
   - training data that meets a registered test or golden version refuses (the holdout door);

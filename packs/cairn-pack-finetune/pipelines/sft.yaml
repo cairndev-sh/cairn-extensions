@@ -5,7 +5,7 @@
 # Prepared data only: `train_version`, `val_version` and `test_version` are registered `dataset:`
 # refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. The launch
 # door decides the admission before any record exists:
-#   * each version has the role its input declares (ADR-0142): a test set given as training data,
+#   * each version has the role its input declares (ADR-0146): a test set given as training data,
 #     or a path instead of a registered version, refuses the launch;
 #   * the train and val versions carry an intake verdict, and none is blocked or invalid;
 #   * the holdout check: training data that meets a registered test or golden version refuses it;
@@ -38,7 +38,7 @@ outcome: Fine-tune a model on prepared data and decide whether to keep it
 suite: model
 
 inputs:
-  # ADR-0142 — each version must have the role its input names, and a training version must carry
+  # ADR-0146 — each version must have the role its input names, and a training version must carry
   # an intake verdict; the launch door refuses anything else before a record exists.
   train_version: {type: str, role: training, verdict: required, description: "dataset:<name>-train@<v> — the registered training version."}
   val_version: {type: str, role: validation, verdict: required, description: "dataset:<name>-val@<v> — the registered validation version."}

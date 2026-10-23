@@ -145,7 +145,7 @@ def test_the_full_run_never_trains_on_a_subsample_and_always_measures_the_baseli
 
 
 async def test_the_launch_door_refuses_a_test_set_given_as_training_data(versions, monkeypatch):
-    """ADR-0142 through the real launch door with this pack's `sft` definition: the refusal comes
+    """ADR-0146 through the real launch door with this pack's `sft` definition: the refusal comes
     before any record (the bridge is never called)."""
     import cairn.core.storage.artifacts as artifacts
     from cairn.core.admission_door import AdmissionRefusedError
