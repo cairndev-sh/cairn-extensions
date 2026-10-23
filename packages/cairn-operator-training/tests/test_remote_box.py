@@ -211,3 +211,22 @@ def test_the_gpu_metrics_carry_the_optimizer_steps():
 
     stats = types.SimpleNamespace(global_step=353, training_loss=0.6, metrics={})
     assert _base_metrics(stats)["steps"] == 353
+
+
+def test_train_qlora_on_the_gpu_path_reports_steps(tmp_path, monkeypatch):
+    """`train.qlora`'s `steps` is what the sft pipeline's promote-model card shows
+    (`train_qlora_steps`); on the GPU path it comes from train_entry's own metrics."""
+    import operator_training.train_entry as te
+    from operator_training import flow_stages as fs
+    from operator_training.operators import local
+
+    def fake_main(spec_dict, reporter=None, *, output_dir=None):
+        _trained_dir(Path(output_dir))
+        stats = types.SimpleNamespace(global_step=12, training_loss=0.7, metrics={})
+        return {"adapter_uri": output_dir, "metrics": te._base_metrics(stats), "run_url": ""}
+
+    monkeypatch.setattr(local, "_use_gpu_unsloth", lambda spec: True)
+    monkeypatch.setattr(te, "main", fake_main)
+    monkeypatch.setattr(fs, "_available_ram_bytes", lambda: 256 * 2**30)
+    stats = fs.train_qlora(tmp_path, {"output_name": "m", "dataset_uri": "hf://d", "artifact_target": "local"}, [])
+    assert stats["steps"] == 12
