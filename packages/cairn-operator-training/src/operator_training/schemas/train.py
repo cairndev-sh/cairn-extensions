@@ -1,7 +1,7 @@
 """Schemas for the `train.run` capability."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Optional, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,16 @@ class TrainSpec(BaseModel):
 
     # Data split + reproducibility.
     eval_split: float = Field(0.1, ge=0, lt=1, description="Fraction held out for mid-training eval.")
+    # cairn-extensions#4 (training.stage.train_qlora/1.1.0): the governed splits and the trainer
+    # knobs. Every default keeps today's behaviour. train.run/1.0.0's input schema is open, so
+    # these optional fields do not change that contract.
+    train_uri: str = Field("", description="A governed train split; when set it is the training data, in place of dataset_uri.")
+    eval_uri: str = Field("", description="A governed validation split; when set the trainer evaluates on it and eval_split is not used.")
+    test_uri: str = Field("", description="The held-out test split; recorded on the result, never opened by the trainer.")
+    per_device_batch_size: int = Field(0, ge=0, description="Rows per device per step; 0 keeps the trainer's default.")
+    gradient_accumulation_steps: int = Field(0, ge=0, description="Steps accumulated before an optimizer step; 0 keeps the trainer's default.")
+    gradient_checkpointing: Optional[bool] = Field(None, description="Trade compute for activation memory; None keeps the trainer's default.")
+    lora_dropout: Optional[float] = Field(None, ge=0, le=1, description="LoRA dropout; None keeps the trainer's default.")
     seed: int = Field(42, description="Split/training seed for reproducibility.")
 
     #: Pipeline-validation mode (#536): run the ENTIRE training path on CPU with a

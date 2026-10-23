@@ -18,7 +18,7 @@ requires-python = ">=3.12"
 dependencies = [
     "cairndev>=0.2.0,<0.3",
     "cairn-contracts-training==1.0.0",
-    "cairn-contracts-training-stages==1.0.0",
+    "cairn-contracts-training-stages==1.1.0",
 ]
 
 [project.urls]
