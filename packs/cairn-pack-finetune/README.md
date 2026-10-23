@@ -76,7 +76,7 @@ that finds checkpoints there resumes from them. The smoke run uses `smoke_output
 
 | Path | Status | Evidence | Proven on `cairndev` |
 |---|---|---|---|
-| `sft` flow and gates on the stub trainer | EXPERIMENTAL | `tests/test_sft.py`: the pack's flow on the core runner with resolved, pinned versions; the pipeline's own predicates through the core's evaluator | 0.1.5 pre-release (local) |
+| `sft` flow and gates on the stub trainer | EXPERIMENTAL | `tests/test_sft.py`: the pack's flow on the core runner with resolved, pinned versions; the pipeline's own predicates through the core's evaluator | 0.2.0 pre-release (local) |
 | `sft` on an ssh GPU box with QLoRA | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).
