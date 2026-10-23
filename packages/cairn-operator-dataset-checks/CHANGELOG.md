@@ -16,6 +16,8 @@
   the s3 store (`store: s3`, or the environment's `artifact_store = "s3"`): a local split is a
   file in the leg's temporary workdir, and a version registered from it would name bytes that a
   reboot deletes and another machine cannot read, so the stage refuses it before splitting.
+  `split` now implements `dataset.stage.split/1.0.0`, whose configuration is closed: a flow that
+  passes `split` a key the contract does not name is refused by the stage-contract check.
 
 - **A pinned Hub revision and the bundled manifest** (cairn-extensions#5).
   `ingest.normalize` takes `revision` (stage contract 1.2.0: configuration 1.1.0, output 1.2.0)

@@ -508,10 +508,11 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
 
     ``register`` needs the s3 store. A local split is a file in this leg's workdir, which the
     engine makes as a temporary directory: a reboot or a tmp cleanup deletes it, and a control
-    plane on another machine cannot read it. The registry is the core's, and the core makes a
-    registered file durable only by copying it to the object store (``artifact_store = s3``),
-    so a version registered from a local split names bytes that disappear. It is refused before
-    the split runs."""
+    plane on another machine cannot read it. With ``store: s3`` this stage uploads each split
+    itself (``_s3_upload``) and the version names the ``s3://`` object; with the local store
+    the version would name bytes that disappear (the core's own relay to the object store is
+    on only when ``artifact_store = s3``, and copies only what the control plane can read). It
+    is refused before the split runs."""
     from operator_dataset_checks.operators.split import run_split  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks.schemas.split import SplitInput  # noqa: PLC0415
 
