@@ -230,3 +230,87 @@ def test_train_qlora_on_the_gpu_path_reports_steps(tmp_path, monkeypatch):
     monkeypatch.setattr(fs, "_available_ram_bytes", lambda: 256 * 2**30)
     stats = fs.train_qlora(tmp_path, {"output_name": "m", "dataset_uri": "hf://d", "artifact_target": "local"}, [])
     assert stats["steps"] == 12
+
+
+# ── the model's identity is the published bytes ────────────────────────────
+
+def _package(workdir: Path, local_dir: Path, adapter_uri: str) -> dict:
+    from operator_training.flow_stages import package_adapter
+
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "train_result.json").write_text(json.dumps({
+        "status": "succeeded", "backend": "unsloth-gpu", "adapter_uri": adapter_uri,
+        "local_adapter_dir": str(local_dir), "metrics": {}}))
+    return package_adapter(workdir, {}, [])
+
+
+def test_the_model_hash_is_the_published_files_whatever_checkpoints_sit_beside_them(tmp_path, monkeypatch):
+    """package.adapter's content_hash must name the bytes the published URI holds: the
+    adapter at the top of the output dir, never `checkpoint-*/` (save_total_limit keeps two)
+    nor the pickled training_args.bin; and a retry's S3 pull (which drops the run's
+    `adapter/` prefix into the dir) must change neither the hash nor the published set."""
+    boto3 = pytest.importorskip("boto3")
+    moto = pytest.importorskip("moto")
+    from operator_training.flow_stages import hash_candidate_dir
+    from operator_training.publish import adapter_files, publish_adapter_dir
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "t")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "t")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("CAIRN_CHECKPOINT_BUCKET", "ckpts")
+    monkeypatch.setenv("CAIRN_PARENT_RUN", "run-a")
+    out = _trained_dir(Path(CS.trainer_output_dir("sft", tmp_path / "job")))
+    (out / "training_args.bin").write_bytes(b"pickled args naming " + str(out).encode())
+    (out / "checkpoint-5" / "training_args.bin").write_bytes(b"args")
+    with moto.mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket="ckpts")
+        uri = publish_adapter_dir("s3", str(out))
+        stats = _package(tmp_path / "job", out, uri)
+        # the published bytes, fetched back: their identity is the descriptor's
+        fetched = tmp_path / "fetched"
+        CS.download_prefix("ckpts", uri.removeprefix("s3://ckpts/").rstrip("/"), str(fetched))
+        assert sorted(p.name for p in fetched.iterdir()) == adapter_files(str(out))
+        assert stats["content_hash"] == hash_candidate_dir(fetched)[0]
+        # more or fewer checkpoints: the same model
+        ck = out / "checkpoint-10"
+        ck.mkdir()
+        (ck / "adapter_model.safetensors").write_text("step-10 weights")
+        assert _package(tmp_path / "job", out, uri)["content_hash"] == stats["content_hash"]
+        for d in ("checkpoint-5", "checkpoint-10"):
+            for f in (out / d).iterdir():
+                f.unlink()
+            (out / d).rmdir()
+        assert _package(tmp_path / "job", out, uri)["content_hash"] == stats["content_hash"]
+        # a retry of the run pulls s3://…/run-a/ (checkpoints and adapter/) into a fresh dir
+        retry = Path(CS.trainer_output_dir("sft", tmp_path / "retry"))
+        CS.download_prefix("ckpts", f"{CS.DEFAULT_PREFIX}/run-a", str(retry))
+        assert (retry / "adapter" / "adapter_model.safetensors").is_file()
+        for name in _ADAPTER:
+            (retry / name).write_text(name)
+        assert adapter_files(str(retry)) == sorted(_ADAPTER)
+        assert hash_candidate_dir(retry) == hash_candidate_dir(fetched)
+
+
+# ── report_to: [mlflow] without the client ──────────────────────────────────
+
+def test_a_missing_mlflow_client_names_the_extra_and_reaches_the_stage_output(tmp_path, monkeypatch):
+    import operator_training.train_entry as te
+    from operator_training import flow_stages as fs
+    from operator_training.operators import local
+
+    monkeypatch.setitem(sys.modules, "mlflow", None)  # `import mlflow` raises, as on a [gpu]-only box
+    reason = te._preflight_mlflow()
+    assert "cairn-operator-training[gpu,track-mlflow]" in reason
+
+    def fake_main(spec_dict, reporter=None, *, output_dir=None):
+        _trained_dir(Path(output_dir))
+        return {"adapter_uri": output_dir, "run_url": "",
+                "metrics": {"train_loss": 0.5, "steps": 3, "tracking_error": reason}}
+
+    monkeypatch.setattr(local, "_use_gpu_unsloth", lambda spec: True)
+    monkeypatch.setattr(te, "main", fake_main)
+    monkeypatch.setattr(fs, "_available_ram_bytes", lambda: 256 * 2**30)
+    stats = fs.train_qlora(tmp_path, {"output_name": "m", "dataset_uri": "hf://d", "artifact_target": "local",
+                                      "report_to": ["mlflow"]}, [])
+    assert stats["tracking_error"] == reason

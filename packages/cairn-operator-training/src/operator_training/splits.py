@@ -64,6 +64,8 @@ def baseline(spec: Any, evaluate_base: Callable[[], dict], *, has_eval: bool) ->
     after training: the same rows, the same trainer, the base model's weights. Evaluating before
     ``train()`` instead broke the fp16 path on a T4 ("Attempting to unscale FP16 gradients", the
     first GPU run of Qwen3-4B-Base), and could not measure a run that resumed from a checkpoint.
+    With ``init_adapter_uri`` (a run continuing an adapter) disabling the adapter leaves the bare
+    base model, so the baseline is the base model, not the adapter the run started from.
     Skipped, with the reason recorded, when there is no evaluation data."""
     if not _get(spec, "baseline_eval", False):
         return {}

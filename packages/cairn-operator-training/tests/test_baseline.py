@@ -1,6 +1,6 @@
-"""The base model's evaluation loss before the first step (training.stage.train_qlora/1.2.0,
-cairn-extensions#7). ``splits.baseline`` is what both trainers call between building the trainer
-and ``train()``; these tests drive it with a fake evaluate, and the stage through the stub tier, so
+"""The base model's evaluation loss, measured after training with the adapter disabled
+(training.stage.train_qlora/1.2.0, cairn-extensions#7). ``splits.baseline`` is what both trainers
+call after ``train()``; these tests drive it with a fake evaluate, and the stage through the stub tier, so
 no training stack is needed."""
 from __future__ import annotations
 

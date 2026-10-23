@@ -90,8 +90,9 @@ revision = "1.1.0"
 kind = "schema"
 path = "schemas/training.stage.train_qlora.configuration.1.1.0.json"
 
-# cairn-extensions#7 — train.qlora 1.2.0: baseline_eval, the base model's evaluation loss before
-# the first step (new configuration and output revisions). Every earlier file is unchanged.
+# cairn-extensions#7 — train.qlora 1.2.0: baseline_eval, the base model's evaluation loss, measured
+# after training with the adapter disabled (new configuration and output revisions). Every earlier
+# file is unchanged.
 [[definitions]]
 id = "training.stage.train_qlora"
 revision = "1.2.0"

@@ -55,8 +55,8 @@ class TrainSpec(BaseModel):
     lora_dropout: Optional[float] = Field(None, ge=0, le=1, description="LoRA dropout; None keeps the trainer's default.")
     # cairn-extensions#7 (training.stage.train_qlora/1.2.0): the base model's loss on the evaluation
     # data, measured with the adapter disabled after training, so a run compares its candidate with the model it
-    # started from on the same rows.
-    baseline_eval: bool = Field(False, description="Evaluate once before training and report baseline_eval_loss.")
+    # started from on the same rows. With init_adapter_uri that is the bare base model, not the adapter it continued.
+    baseline_eval: bool = Field(False, description="Report baseline_eval_loss: the base model's loss on the evaluation data, measured after training with the adapter disabled (with init_adapter_uri, the bare base model).")
     seed: int = Field(42, description="Split/training seed for reproducibility.")
 
     #: Pipeline-validation mode (#536): run the ENTIRE training path on CPU with a

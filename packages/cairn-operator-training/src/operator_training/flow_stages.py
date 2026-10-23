@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from operator_training import dataset_fetch, live
-from operator_training.publish import publish_adapter_dir
+from operator_training.publish import adapter_files, publish_adapter_dir
 
 
 class _Ctx:
@@ -315,6 +315,9 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
         "method": spec.method,
         # cairn-extensions#7 — present only with baseline_eval (the value, or why it was skipped).
         **{k: metrics[k] for k in ("baseline_eval_loss", "baseline_skipped") if k in metrics},
+        # #1709 soft failure, as train.distill: a tracker that was asked for and dropped (the client
+        # missing, or the server unreachable) is on the record, not only in the trainer's log
+        **({"tracking_error": str(metrics["tracking_error"])} if metrics.get("tracking_error") else {}),
     }
 
 
@@ -361,6 +364,13 @@ def eval_checkpoints(workdir: Path, config: dict, inputs: list[str]) -> dict:
 #: checkpoints, tokenizer copies and manifests are not identity (#2189).
 _CANDIDATE_FILES = ("adapter_config.json", "config.json")
 _CANDIDATE_SUFFIXES = (".safetensors", ".bin")
+#: A ``.bin`` the trainer writes beside the weights that is not the model: the pickled
+#: TrainingArguments (it names the output dir, so it differs per job for the same weights).
+_NOT_CANDIDATE = ("training_args.bin",)
+
+
+def _is_candidate_file(name: str) -> bool:
+    return name not in _NOT_CANDIDATE and (name in _CANDIDATE_FILES or Path(name).suffix in _CANDIDATE_SUFFIXES)
 _STUB_KNOBS = ("base_model", "method", "lora_r", "lora_alpha", "learning_rate", "epochs",
                "max_steps", "seed", "target_modules", "max_seq_len", "output_name")
 
@@ -392,11 +402,15 @@ def hash_candidate_dir(path: Path) -> "tuple[str, int] | None":
     """Content identity of an adapter/model directory: sha256 over the sorted
     candidate files (relative name + bytes). ``None`` when nothing hashable is
     there — a remote-only URI has no bytes here, and that is reported, never
-    faked. Hash the safetensors, not the logs (#2189 risk note)."""
+    faked. Hash the safetensors, not the logs (#2189 risk note).
+
+    The files come from :func:`operator_training.publish.adapter_files`, the set the publish
+    uploads (the top of the directory), so every hashed byte is a published byte: a
+    ``checkpoint-*/`` dir (or an ``adapter/`` dir a retry's S3 pull drops in) is never part
+    of the identity, whatever ``save_total_limit`` kept."""
     if not path.is_dir():
         return None
-    files = sorted(p for p in path.rglob("*")
-                   if p.is_file() and (p.name in _CANDIDATE_FILES or p.suffix in _CANDIDATE_SUFFIXES))
+    files = [path / n for n in adapter_files(str(path)) if _is_candidate_file(n)]
     if not files:
         return None
     h = hashlib.sha256()
