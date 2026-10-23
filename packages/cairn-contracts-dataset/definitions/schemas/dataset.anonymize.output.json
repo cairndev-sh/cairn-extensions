@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.anonymize.output/1.0.0",
+  "properties": {
+    "backend_used": {
+      "description": "The backend actually used (regex | regexset | presidio).",
+      "title": "Backend Used",
+      "type": "string"
+    },
+    "total": {"description": "Total rows processed.", "title": "Total", "type": "integer"},
+    "rows_redacted": {
+      "description": "Rows where at least one value was redacted.",
+      "title": "Rows Redacted",
+      "type": "integer"
+    },
+    "counts": {
+      "additionalProperties": {"type": "integer"},
+      "description": "Per-kind total redactions across the dataset.",
+      "title": "Counts",
+      "type": "object"
+    },
+    "output_path": {"description": "Path the redacted dataset was written to.", "title": "Output Path", "type": "string"}
+  },
+  "required": ["backend_used", "total", "rows_redacted", "output_path"],
+  "title": "AnonymizeOutput",
+  "type": "object"
+}

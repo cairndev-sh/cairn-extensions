@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.decontam",
+  "revision": "1.0.0",
+  "summary": "Train/eval contamination of a JSONL training set against an eval set (exact hash, n-gram, both or MinHash overlap); checked=false when no eval set is given.",
+  "input": "contract://dataset.decontam.input/1.0.0",
+  "configuration": "contract://dataset.decontam.configuration/1.0.0",
+  "output": "contract://dataset.decontam.output/1.0.0"
+}

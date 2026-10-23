@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.ingest_normalize.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "description": "Source: local path, file:// or s3:// URI (optionally #sha256=<hash>) or HF id; else the first input artifact."}
+  },
+  "additionalProperties": false
+}

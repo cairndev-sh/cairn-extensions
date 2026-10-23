@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.decontam.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "Deployment-tunable knobs of ``dataset/decontam`` (ADR-0070) \u2014 the near-dup\noverlap parameters. **Operational** scope (the default): a workflow/run may\ntune these freely. A subset of ``DecontamInput``; the safe defaults live on\n``DecontamInput``.",
+  "properties": {
+    "overlap_threshold": {
+      "default": 0.8,
+      "description": "Jaccard similarity (0-1) at/above which a train row is flagged as near-dup contamination.",
+      "title": "Contamination overlap threshold",
+      "type": "number",
+      "$comment": "recommended: 0.7 (a console suggestion, never applied, #791)"
+    },
+    "ngram": {
+      "default": 13,
+      "description": "Shingle window size in words (ngram/both/minhash).",
+      "title": "Shingle window",
+      "type": "integer"
+    },
+    "num_perm": {
+      "default": 128,
+      "description": "MinHash signature length \u2014 higher is more accurate but slower (minhash).",
+      "title": "MinHash permutations",
+      "type": "integer"
+    }
+  },
+  "title": "DecontamConfig",
+  "type": "object"
+}

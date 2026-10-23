@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.export_jsonl",
+  "revision": "1.1.0",
+  "summary": "`export.jsonl` \u2014 Emit the working dataset as the leg's JSONL product, locally or to the s3 artifact store.",
+  "configuration": "contract://dataset.stage.export_jsonl.configuration/1.0.0",
+  "output": "contract://dataset.stage.export_jsonl.output/1.1.0"
+}

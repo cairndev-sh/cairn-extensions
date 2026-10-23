@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.anonymize.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "The deployment-tunable surface of ``dataset/anonymize`` (ADR-0068/0070).\n\nA subset of ``AnonymizeInput`` \u2014 just ``kinds``, tagged **governance** (ADR-0070):\n*which* PII entity kinds must be redacted is a compliance/privacy policy, not a\nper-run tuning knob. Like a gate threshold it is **env-owned and never weakenable**\nby a workflow or run \u2014 a run cannot NARROW the redaction set (redact fewer kinds =\nweaker privacy). The strict floor is the default ``None`` = *redact every recognized\nkind* (on ``AnonymizeInput``); env config may pin an explicit subset per environment.\n\nNOTE (the ADR-0070 clobber rule): ``kinds`` is intentionally left UNBOUND in the\n``run-prep-anonymize`` operation YAML so the config layer supplies it \u2014 a baked\n``$default($input.anon_kinds, \u2026)`` binding would win over config and defeat the\ngovernance guarantee. ``backend`` stays a plain operational input (not governed).",
+  "properties": {
+    "kinds": {
+      "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
+      "default": null,
+      "description": "The recognizer/entity kinds that must be redacted (null = every recognized kind \u2014 the strict default). Env-owned governance: a workflow/run cannot narrow it.",
+      "title": "PII kinds to redact"
+    },
+    "preset": {
+      "default": "governed",
+      "description": "Ready-made redaction configuration.\n\u2022 governed (default) \u2014 NER + regex + secrets: redacts names, locations, emails, phones, cards, and API keys. Best coverage.\n\u2022 logs \u2014 regex + secrets only (no name/location redaction). Faster and lighter; use for log/trace data with no personal names.\nRedaction always processes every row (it cannot sample), so mode here mainly trades coverage for speed. Env-owned (governance): a run cannot silently weaken it.",
+      "enum": ["governed", "logs"],
+      "title": "Redaction mode",
+      "type": "string"
+    },
+    "ner": {
+      "default": true,
+      "description": "Redact PERSON / LOCATION / ORGANIZATION detected by the language model. Turn OFF to redact only pattern-based PII (emails, phones, cards, secrets) \u2014 faster and lighter, but names and places are left in the data. Keep ON for training datasets. Env-owned (governance).",
+      "title": "Redact names & locations (NER)",
+      "type": "boolean"
+    },
+    "model": {
+      "default": "sm",
+      "description": "spaCy model used to find names/locations to redact (ignored when NER is off). sm = fast, ~550 MB, small miss rate; lg = highest recall, ~1.2-1.7 GB; blank = no NER. Env-owned (governance).",
+      "enum": ["blank", "sm", "lg"],
+      "title": "Language model",
+      "type": "string"
+    },
+    "n_process": {
+      "default": 0,
+      "description": "CPU workers sharing the redaction pass. 0 = auto (all cores; ~40% faster on 2 CPUs). Set 1 for lowest RAM when the box runs other services. Capped at the core count.",
+      "title": "Parallel workers",
+      "type": "integer"
+    },
+    "analyze_chunk": {
+      "default": 2048,
+      "description": "Rows fed to the detector at once. Larger = parallel workers stay busy; smaller = less memory. 2048 is a good default.",
+      "title": "Rows per batch",
+      "type": "integer"
+    },
+    "backend": {
+      "default": "auto",
+      "description": "Detector engine: 'auto' (cascade when presidio installed, else regex) fits almost every case. Advanced: 'cascade', 'presidio', 'regex', 'regexset'.",
+      "title": "PII backend",
+      "type": "string"
+    }
+  },
+  "$comment": "scope: governance (ADR-0070) - env-owned; a run-supplied value is stripped (#905)",
+  "title": "AnonymizeConfig",
+  "type": "object"
+}

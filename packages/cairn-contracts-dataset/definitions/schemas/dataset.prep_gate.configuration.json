@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_gate.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "The deployment-tunable surface of ``dataset/prep_gate`` (ADR-0070).\n\nA SUBSET of ``PrepGateInput`` (just ``mode``) so ``[profile.config.\"dataset/\nprep_gate\"]`` deep-merges under the input and ``run()`` reads ``inp.mode``\nunchanged. ``scope=governance``: env-owned \u2014 a workflow/run can NOT switch its\nown PII gate off (that would be a governance bypass).",
+  "properties": {
+    "mode": {
+      "default": "off",
+      "description": "off = surface only (report warns); block = fail-closed verdict on a dirty scrub; hitl = pause for human review of the residual PII.",
+      "enum": ["off", "block", "hitl"],
+      "title": "Post-scrub PII gate",
+      "type": "string"
+    }
+  },
+  "$comment": "scope: governance (ADR-0070) - env-owned; a run-supplied value is stripped (#905)",
+  "title": "PrepGateConfig",
+  "type": "object"
+}

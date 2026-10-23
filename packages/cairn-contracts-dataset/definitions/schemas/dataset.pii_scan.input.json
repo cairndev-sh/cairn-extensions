@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.pii_scan.input/1.0.0",
+  "properties": {
+    "path": {
+      "description": "Path to a JSONL fine-tuning dataset (one example per line).",
+      "title": "Path",
+      "type": "string"
+    },
+    "kinds": {
+      "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
+      "default": null,
+      "description": "Subset of recognizers/entities to run (default: all available).",
+      "title": "Kinds"
+    },
+    "text_fields": {
+      "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
+      "default": null,
+      "description": "Top-level field name(s) that hold the training TEXT to scan (e.g. ['source_text'] or ['messages']). null = auto: scan every field but keep only free-text leaves \u2014 short whitespace-free strings (tokens, BIO labels, ids, chat roles) are skipped so a tokenized/labelled dataset doesn't run the NER once per token (#1021).",
+      "title": "Text Fields"
+    },
+    "backend": {
+      "default": "auto",
+      "description": "'auto' (presidio if installed, else regex) | 'regex' | 'regexset' (single-pass re2, [fastpii] extra) | 'presidio' | 'cascade' (regex-in-presidio, ADR-0079).",
+      "title": "Backend",
+      "type": "string"
+    },
+    "preset": {
+      "default": "governed",
+      "description": "Ready-made PII-scan configuration; individual settings below override it. 'governed' (default) = spaCy NER + regex + secrets \u2014 finds names, locations, emails, phones, cards, API keys (best recall; ~7 min/200k rows on a 2-CPU box, ~550 MB). 'logs' = regex + secrets only, NO name/location detection (NER off) \u2014 faster and ~200 MB; use for logs, traces, and incident data with no personal names.",
+      "enum": ["governed", "logs"],
+      "title": "Preset",
+      "type": "string"
+    },
+    "ner": {
+      "anyOf": [{"type": "boolean"}, {"type": "null"}],
+      "default": null,
+      "description": "Detect names & locations (PERSON/LOCATION/ORGANIZATION) with the spaCy model \u2014 the PII that has no fixed pattern. Turn OFF for regex + secrets only: much faster and lighter, but names and places are NOT found. Leave ON for training data; off is only safe for structured/log data. null = use the preset's value.",
+      "title": "Ner"
+    },
+    "model": {
+      "anyOf": [{"enum": ["blank", "sm", "lg"], "type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Language model powering name/location detection (ignored when NER is off). 'sm' = fast, ~550 MB, misses ~1-2% of names (best on a small box); 'lg' = highest recall, ~1.2-1.7 GB, same speed; 'blank' = tokenizer only (no NER). null = use the preset's model.",
+      "title": "Model"
+    },
+    "n_process": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": null,
+      "description": "CPU workers sharing the detection pass. 0 = auto (all cores) \u2014 on a 2-CPU box ~40% faster than a single worker. 1 = single process (lowest RAM, e.g. when the box runs other heavy services). Values above the core count are capped automatically. null = use the preset's value.",
+      "title": "N Process"
+    },
+    "analyze_chunk": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": null,
+      "description": "Rows fed to the detector at once. Larger batches keep the parallel workers busy (needed for 'n_process' to actually help); smaller batches use less memory. ~2048 is a good balance \u2014 you rarely need to change it. null = use the preset's value.",
+      "title": "Analyze Chunk"
+    },
+    "sample_size": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": 1000,
+      "description": "Reservoir-sample this many rows before checking \u2014 a statistically valid estimate for a readiness gate that keeps the scan O(1) in dataset size (the #737 safe cap; presidio-per-row on an unbounded HF dataset can wedge a small box). Set null to scan every row. Deployment/workflow-tunable via PiiScanConfig (ADR-0070).",
+      "title": "Sample Size"
+    },
+    "max_findings": {
+      "default": 1000,
+      "description": "Cap the enumerated `findings` list at this many rows so the REPORT stays bounded on a heavily-PII, >>RAM corpus (#891) \u2014 `counts` and `rows_with_pii` remain EXACT (every row is still scanned), only the per-row detail list is capped (`findings_truncated` flags it). 0 = unbounded (small-file convenience).",
+      "title": "Max Findings",
+      "type": "integer"
+    },
+    "secrets_full_scan": {
+      "default": true,
+      "description": "ADR-0080 P1 \u2014 the SECRET tier (AWS/OpenAI/GitHub keys, JWTs, private keys) scans EVERY row with cheap regex, even when NER density is sampled: a rare leaked key would slip past a 1000-row sample ~90% of the time. Merged into `counts` in the gate's blocking vocabulary. Set false only for a pure density estimate with no absolute-blocker guarantee.",
+      "title": "Secrets Full Scan",
+      "type": "boolean"
+    }
+  },
+  "required": ["path"],
+  "title": "PiiInput",
+  "type": "object"
+}

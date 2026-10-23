@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.replay.output/1.0.0",
+  "$defs": {
+    "ReplayMixEntry": {
+      "description": "One replay source's contribution to the mix — the per-row-group\nprovenance record. Counts and locations only; never row text.",
+      "properties": {
+        "source": {
+          "description": "The source as given (a resolved dataset URI keeps its '#sha256=<hash>' pin, so the mix names an exact version).",
+          "title": "Source",
+          "type": "string"
+        },
+        "rows_taken": {
+          "default": 0,
+          "description": "Rows sampled from this source into the mix.",
+          "title": "Rows Taken",
+          "type": "integer"
+        },
+        "rows_available": {
+          "default": 0,
+          "description": "Rows this source could have contributed (after the dedup_against_new filter, if enabled).",
+          "title": "Rows Available",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "ReplayMixEntry",
+      "type": "object"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "out_path": {
+      "description": "Path the mixed dataset was written to.",
+      "title": "Out Path",
+      "type": "string"
+    },
+    "total_rows": {
+      "default": 0,
+      "description": "Rows written (new + replay).",
+      "title": "Total Rows",
+      "type": "integer"
+    },
+    "new_rows": {
+      "default": 0,
+      "description": "Rows carried over from new_rows_path.",
+      "title": "New Rows",
+      "type": "integer"
+    },
+    "replay_rows": {
+      "default": 0,
+      "description": "Rows sampled from the replay sources.",
+      "title": "Replay Rows",
+      "type": "integer"
+    },
+    "ratio_actual": {
+      "default": 0.0,
+      "description": "replay_rows / total_rows — the ratio actually achieved, which is below `ratio` when the sources ran dry.",
+      "title": "Ratio Actual",
+      "type": "number"
+    },
+    "strategy_used": {
+      "default": "uniform",
+      "description": "The strategy actually applied.",
+      "title": "Strategy Used",
+      "type": "string"
+    },
+    "mix": {
+      "description": "Per-row-group provenance: one entry per source, in `sources` order — the same order their blocks appear in the output.",
+      "items": {
+        "$ref": "#/$defs/ReplayMixEntry"
+      },
+      "title": "Mix",
+      "type": "array"
+    }
+  },
+  "required": [
+    "out_path"
+  ]
+}

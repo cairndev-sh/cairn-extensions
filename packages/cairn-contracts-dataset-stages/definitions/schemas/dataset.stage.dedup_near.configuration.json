@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dedup_near.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "threshold": {"type": "number", "default": 0.8, "description": "Jaccard similarity threshold."},
+    "num_perm": {"type": "integer", "default": 128, "description": "MinHash permutations."},
+    "ngram": {"type": "integer", "default": 3, "description": "Shingle size."},
+    "normalize": {"type": "boolean", "default": true, "description": "Collapse whitespace and case first."}
+  },
+  "additionalProperties": false
+}

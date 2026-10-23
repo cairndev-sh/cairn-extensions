@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.ingest_normalize.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {"type": "integer", "minimum": 0, "description": "Rows written to the working dataset."},
+    "source": {"type": "string", "description": "What was read: the lineage parent."},
+    "source_hash": {"type": "string", "description": "sha256 of the local bytes read, when the source is a local file."},
+    "source_bytes": {"type": "integer", "minimum": 0, "description": "Size of the local bytes read."}
+  },
+  "required": ["rows", "source"]
+}

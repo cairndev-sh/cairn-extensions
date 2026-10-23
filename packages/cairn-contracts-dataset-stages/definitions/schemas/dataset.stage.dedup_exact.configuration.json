@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dedup_exact.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "backend": {"type": "string", "default": "python", "description": "python or duckdb."},
+    "method": {"type": "string", "default": "exact", "description": "Dedup method of the python backend."},
+    "normalize": {"type": "boolean", "default": true, "description": "Collapse whitespace and case before hashing."}
+  },
+  "additionalProperties": false
+}

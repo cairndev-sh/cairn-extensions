@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.split.input/1.0.0",
+  "properties": {
+    "path": {"description": "Path to the source JSONL dataset.", "title": "Path", "type": "string"},
+    "output_dir": {
+      "description": "Directory to write train.jsonl/val.jsonl[/test.jsonl] into.",
+      "title": "Output Dir",
+      "type": "string"
+    },
+    "seed": {
+      "default": 13,
+      "description": "Seed for the deterministic hash/shuffle assignment. Same dataset + seed always reproduces the identical split.",
+      "title": "Seed",
+      "type": "integer"
+    },
+    "train_ratio": {
+      "default": 0.9,
+      "description": "Fraction of rows/groups assigned to train.",
+      "title": "Train Ratio",
+      "type": "number"
+    },
+    "val_ratio": {
+      "default": 0.1,
+      "description": "Fraction of rows/groups assigned to val.",
+      "title": "Val Ratio",
+      "type": "number"
+    },
+    "test_ratio": {
+      "default": 0.0,
+      "description": "Fraction assigned to test. 0 (default) omits test.jsonl entirely \u2014 SFT convention is train + a small held-out val for loss monitoring; a dedicated benchmark eval-gate covers what a classic test split would, so test is opt-in, not the classic 70/15/15 default.",
+      "title": "Test Ratio",
+      "type": "number"
+    },
+    "group_by": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Row field (e.g. a doc/source id) whose value must never span two splits \u2014 every row sharing this field's value is assigned to the SAME split. None means every row is its own group (no grouping).",
+      "title": "Group By"
+    },
+    "stratify_by": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Row field whose value distribution should be balanced across splits (e.g. source/task/language).",
+      "title": "Stratify By"
+    },
+    "backend": {
+      "default": "auto",
+      "description": "'auto' (sklearn if installed and useful, else hash) | 'hash' (pure-stdlib, always available) | 'sklearn' (StratifiedShuffleSplit/GroupShuffleSplit/StratifiedGroupKFold, needs the [split] extra).",
+      "title": "Backend",
+      "type": "string"
+    },
+    "shard_size": {
+      "default": 0,
+      "description": "Rows per output shard (#891). 0 (default) writes ONE <split>.jsonl per split \u2014 the back-compatible shape. >0 rolls to <split>.00001.jsonl \u2026 every shard_size rows so a >>RAM split lands as many bounded files a downstream reader can stream/parallelize. Only the streaming hash backend shards; the sklearn (materialized) path always writes one file.",
+      "title": "Shard Size",
+      "type": "integer"
+    },
+    "register_as": {
+      "default": "",
+      "description": "#2020 (ADR-0102 D1) \u2014 register each split as a FROZEN CHILD VERSION of this dataset name: '<register_as>-train' (role training), '-val' (validation) and '-test' (test), each with its own content hash, lineage back to the parent version, and the declared split policy on the record. Empty (default) writes files only, exactly as before. Items never move: a re-split under a different policy mints NEW children and leaves the old ones byte-identical at their old version numbers.",
+      "title": "Register As",
+      "type": "string"
+    },
+    "parent_ref": {
+      "default": "",
+      "description": "The parent's 'dataset:<name>@<version>' ref, recorded as the children's parent_version and the source of their inherited schema / column mapping. Empty resolves the head version of `register_as` when one exists.",
+      "title": "Parent Ref",
+      "type": "string"
+    }
+  },
+  "required": ["path", "output_dir"],
+  "title": "SplitInput",
+  "type": "object"
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.publish_fingerprints.input/1.0.0",
+  "properties": {
+    "path": {
+      "description": "Path to the CLEANED JSONL a dataflow produced (control-side copy \u2014 the SSH engine fetches export outputs back). Its rows are what a later batch's cross-batch probe dedups against.",
+      "title": "Path",
+      "type": "string"
+    },
+    "dataset_id": {
+      "description": "Logical dataset this batch belongs to \u2014 the index is scoped to it. Empty means 'no cross-batch identity', and publishing is skipped.",
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "batch_id": {
+      "description": "This batch's id; a probe excludes it so a batch never dedups against itself.",
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "normalize": {
+      "default": true,
+      "description": "Collapse whitespace before hashing \u2014 MUST match the setting the dedup stage used, or the published hashes won't line up with what a future probe computes.",
+      "title": "Normalize",
+      "type": "boolean"
+    }
+  },
+  "required": ["path", "dataset_id", "batch_id"],
+  "title": "PublishFingerprintsInput",
+  "type": "object"
+}

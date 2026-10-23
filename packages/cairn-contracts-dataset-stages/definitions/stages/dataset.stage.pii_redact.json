@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.pii_redact",
+  "revision": "1.0.0",
+  "summary": "`pii.redact` — Redact secrets and PII in every row; backend none is a declared pass-through.",
+  "configuration": "contract://dataset.stage.pii_redact.configuration/1.0.0",
+  "output": "contract://dataset.stage.pii_redact.output/1.0.0"
+}

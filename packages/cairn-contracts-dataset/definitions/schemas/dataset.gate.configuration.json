@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.gate.configuration/1.0.0",
+  "$defs": {
+    "GateThresholds": {
+      "additionalProperties": false,
+      "description": "Severity thresholds. Defaults match the design (\u00a75.3). Deployment-tunable\nvia the profile (ADR-0068, #742): the operator exposes these through\n``GateConfig`` (its ``config_schema``), so ``[profile.config.\"dataset/gate\"\n.thresholds]`` overrides them per environment. The ``title``/bounds drive\n``cairn config scaffold`` and the console Guardrails form.",
+      "properties": {
+        "format_min_conformant_pct": {
+          "default": 99.0,
+          "description": "Rows must parse into a trainer-accepted format. Below this %, the dataset is BLOCKED.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Minimum format conformance",
+          "type": "number"
+        },
+        "decontam_max_overlap_pct": {
+          "default": 5.0,
+          "description": "Above this % contamination between train and eval, the dataset is BLOCKED.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max train/eval overlap",
+          "type": "number"
+        },
+        "refusal_warn_pct": {
+          "default": 20.0,
+          "description": "Above this % of refusal-style responses, WARN (non-blocking).",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Refusal-ratio warn threshold",
+          "type": "number"
+        },
+        "short_warn_frac": {
+          "default": 0.05,
+          "description": "Above this fraction of too-short responses, WARN (non-blocking).",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Too-short-response warn fraction",
+          "type": "number"
+        }
+      },
+      "title": "GateThresholds",
+      "type": "object",
+      "$comment": "scope: governance (ADR-0070) - env-owned; a run-supplied value is stripped (#905)"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The deployment-tunable surface of ``dataset/gate`` (ADR-0068, #742).\n\nA SUBSET of ``GateInput`` \u2014 just the ``thresholds`` sub-model \u2014 so a profile's\n``[profile.config.\"dataset/gate\"]`` deep-merges cleanly under the gate's input\nat invocation, and ``run()`` still reads ``inp.thresholds`` unchanged. This is\nthe operator's ``config_schema``: the published knob surface doctor validates,\n`cairn config scaffold` renders, and the console Guardrails form edits.",
+  "properties": {
+    "thresholds": {
+      "$ref": "#/$defs/GateThresholds",
+      "description": "Severity thresholds that decide the pass / warn / fail verdict.",
+      "title": "Dataset-readiness thresholds"
+    }
+  },
+  "title": "GateConfig",
+  "type": "object"
+}

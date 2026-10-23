@@ -1,0 +1,163 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cairn-operator-dataset-checks"
+version = "0.1.0"
+description = "Dataset readiness for cairn: deterministic checks (format, dedup, decontamination, PII, profile, provenance, split) as governed operations, and the admission and cleaning kernels as dataflow stages."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{name = "cairn maintainers"}]
+requires-python = ">=3.12"
+dependencies = [
+    # Production-proven dataset loading (local JSONL/JSON/CSV/parquet, the HF
+    # Hub, streaming) — we don't hand-roll readers. The Operation base + context
+    # come from the installed engine. Per-check heavy deps stay optional extras
+    # below (presidio / google-re2 / polars+duckdb / datasketch / tokenizers / scikit-learn).
+    "datasets>=2.0",
+    # s3:// jsonl sources and s3 out_paths (dataset/replay) — boto3, NOT s3fs:
+    # aiobotocore's botocore pin fights boto3's, and #1716 already dropped s3fs
+    # from the training pack for the same reason. Same client family the engine
+    # and cairn-operator-training use.
+    "boto3>=1.34",
+    # The engine range this pack is proven on (ADR-0128 D3: bounded, the same range as
+    # `[compat]`) and the two contract wheels it implements, pinned exactly.
+    "cairndev>=0.2.0,<0.3",
+    "cairn-contracts-dataset==1.2.0",
+    "cairn-contracts-dataset-stages==1.1.0",
+]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Documentation = "https://docs.cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+# Optional extras isolate heavy deps so a base install stays lean.
+[project.optional-dependencies]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
+# Every extra-dependent test is importorskip-gated, so the extras themselves are not needed.
+test = ["moto[s3]>=5"]
+
+# Microsoft Presidio for production PII detection + anonymization. The regex
+# backend is the zero-dep fallback used for local testing. Presidio also needs a
+# spaCy model: `python -m spacy download en_core_web_lg`.
+pii = ["presidio-analyzer>=2.2", "presidio-anonymizer>=2.2"]
+
+# google-re2 for the 'regexset' PII backend (#379): combines the SAME regex
+# patterns used by the zero-dep 'regex' backend into one named-group
+# alternation and matches them in a single linear-time pass instead of
+# looping per-pattern — fixes the O(patterns x text) bottleneck on
+# multi-million-row corpora. Not a recall change (see _pii.py for why re2 was
+# picked over pyahocorasick/hyperscan); 'regex' stays the hermetic default
+# and fallback when this extra isn't installed.
+fastpii = ["google-re2>=1.1"]
+
+# polars + duckdb for the COLUMNAR fast path: polars for scan_frame (_io) —
+# vectorized token counts (#381) and MinHash near-dup (#382) over Arrow; duckdb
+# for the ADR-0080 P3 fix job's normalize→parquet + dedup anti-join pass (all
+# cores on the job machine). NOTE: iter_rows' memory-safe streaming needs NO
+# extra — it runs on the base `datasets` dep, and parquet WRITE uses pyarrow (a
+# base transitive dep). This extra only ACCELERATES the columnar operators;
+# without it scan_frame returns None and the fix job falls back to the streaming
+# Python + pyarrow path (hermetic — the fallback keeps tests dep-free).
+fast = ["polars>=1.0", "duckdb>=1.0"]
+
+# datasketch (MinHash + LSH) for the near-duplicate paths (#382): dataset/dedup
+# near-dup clustering and dataset/decontam's scalable 'minhash' contamination
+# method. We do NOT hand-roll LSH banding — datasketch's MinHashLSH picks the
+# band/row split for the requested Jaccard threshold. Without this extra the
+# exact (dedup) and exact/ngram/both (decontam) paths still run; requesting a
+# MinHash path raises a clear RuntimeError.
+minhash = ["datasketch>=1.6"]
+
+# HF tokenizers (Rust-backed) for dataset/profile's accurate subword token
+# counts (#381) — the default whitespace word count is the zero-dep fallback.
+# NOTE: `tokenizers` is often ALREADY present as a transitive dep of
+# `transformers`, but we declare it explicitly so a base install without
+# either package still works (whitespace fallback), and installing just this
+# extra is enough to get the accurate path without pulling in the much
+# heavier `transformers`.
+tokenizers = ["tokenizers>=0.15"]
+
+# scikit-learn for dataset/split's (#383) group-aware + stratified split
+# paths: StratifiedShuffleSplit / GroupShuffleSplit / StratifiedGroupKFold.
+# We do NOT hand-roll the combined group+stratify balanced-assignment
+# problem — sklearn already solves it. Without this extra dataset/split
+# still works via a deterministic stdlib hash-based fallback (see
+# `_split.py` for why hashing is the standard reproducible technique);
+# requesting backend='sklearn' explicitly without the extra raises a clear
+# RuntimeError, mirroring `[minhash]`/`[fastpii]`.
+split = ["scikit-learn>=1.0"]
+
+# Entry-point discovery: each operator registers under the
+# "cairn.operators" group, so `pip install` of this wheel makes the
+# engine find every operator at startup — no further wiring.
+[project.entry-points."cairn.operators"]
+"dataset/format" = "operator_dataset_checks.operators.format:FormatOp"
+"dataset/dedup" = "operator_dataset_checks.operators.dedup:DedupOp"
+"dataset/dedup_apply" = "operator_dataset_checks.operators.dedup_apply:DedupApplyOp"
+"dataset/pii_scan" = "operator_dataset_checks.operators.pii_scan:PiiScanOp"
+"dataset/scan_all" = "operator_dataset_checks.operators.scan_all:ScanAllOp"
+"dataset/decontam" = "operator_dataset_checks.operators.decontam:DecontamOp"
+"dataset/decontam_apply" = "operator_dataset_checks.operators.decontam_apply:DecontamApplyOp"
+"dataset/profile" = "operator_dataset_checks.operators.profile:ProfileOp"
+"dataset/provenance" = "operator_dataset_checks.operators.provenance:ProvenanceOp"
+"dataset/gate" = "operator_dataset_checks.operators.gate:GateOp"
+"dataset/prep_gate" = "operator_dataset_checks.operators.prep_gate:PrepGateOp"
+"dataset/prep_review" = "operator_dataset_checks.operators.prep_review:PrepReviewOp"
+"dataset/sample" = "operator_dataset_checks.operators.sample:SampleOp"
+"dataset/anonymize" = "operator_dataset_checks.operators.anonymize:AnonymizeOp"
+"dataset/curate" = "operator_dataset_checks.operators.curate:CurateOp"
+"dataset/split" = "operator_dataset_checks.operators.split:SplitOp"
+# ADR-0095 §2.3 (#1625) — anti-forgetting as a DATA op: mixes prior-cycle rows
+# from governed dataset versions into the new train slice.
+"dataset/replay" = "operator_dataset_checks.operators.replay:ReplayOp"
+# ADR-0095 §1.2 (#1629) — the three signal→rung projections off the capture
+# export: gold → SFT, preference pairs → DPO, scored prompts → GRPO context.
+"dataset/capture_to_sft" = "operator_dataset_checks.operators.capture_to_sft:CaptureToSftOp"
+"dataset/capture_to_pairs" = "operator_dataset_checks.operators.capture_to_pairs:CaptureToPairsOp"
+"dataset/capture_to_rewards" = "operator_dataset_checks.operators.capture_to_rewards:CaptureToRewardsOp"
+# #1050 — the CONTROL-SIDE cross-batch publish the clean dataflow needs (the
+# data plane's box has no database, so it cannot publish its own index).
+"dataset/publish_fingerprints" = "operator_dataset_checks.operators.publish_fingerprints:PublishFingerprintsOp"
+
+# ADR-0080 P3 (#1031) — on-box entrypoint for the fix job: reads the spec, runs the
+# fix pipeline on the job machine, reports progress + the report over the channel.
+[project.entry-points."cairn.dataflow_stages"]
+"ingest.normalize" = "operator_dataset_checks.dataflow_stages:ingest_normalize"
+"dedup.exact" = "operator_dataset_checks.dataflow_stages:dedup_exact"
+# #2021 (ADR-0102 D1) — the two kernels the intake chain was missing:
+# near-duplicate dedup after the exact pass, and the automatic token profile
+# that carries the over-length policy.
+"dedup.near" = "operator_dataset_checks.dataflow_stages:dedup_near"
+"profile.tokens" = "operator_dataset_checks.dataflow_stages:profile_tokens"
+"pii.redact" = "operator_dataset_checks.dataflow_stages:pii_redact"
+"export.parquet" = "operator_dataset_checks.dataflow_stages:export_parquet"
+"export.jsonl" = "operator_dataset_checks.dataflow_stages:export_jsonl"
+"decontam.apply" = "operator_dataset_checks.dataflow_stages:decontam_apply"
+"sample.rows" = "operator_dataset_checks.dataflow_stages:sample_rows"
+"curate.score" = "operator_dataset_checks.dataflow_stages:curate_score"
+"decontam.scan" = "operator_dataset_checks.dataflow_stages:decontam_scan"
+"split" = "operator_dataset_checks.dataflow_stages:split"
+"scan.all" = "operator_dataset_checks.dataflow_stages:scan_all"
+"filter.rows" = "operator_dataset_checks.dataflow_stages:filter_rows"
+
+# #2022 — the Add-dataset preview reads a bounded sample of any source this
+# pack can read (JSON/JSONL/CSV/Parquet, Hub ids, s3). Core resolves the reader
+# by GROUP so the dependency stays pack -> core (ADR-0084 D1; the gate is
+# tests/core/test_engine_registry.py::test_core_never_imports_an_operator_pack).
+[project.entry-points."cairn.dataset_readers"]
+rows = "operator_dataset_checks._io:iter_rows"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/operator_dataset_checks"]
+exclude = ["CLAUDE.md", "AGENTS.md"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pack.toml" = "operator_dataset_checks/pack.toml"
+
+# Process files (agent instructions) and tests stay out of the source archive.
+[tool.hatch.build.targets.sdist]
+exclude = ["CLAUDE.md", "AGENTS.md", "/.claude", "/tests"]

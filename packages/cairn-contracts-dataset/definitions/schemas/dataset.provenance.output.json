@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.provenance.output/1.0.0",
+  "properties": {
+    "metadata_sources": {
+      "description": "Which sources contributed metadata: 'dataset_info' and/or 'sidecar'.",
+      "items": {"type": "string", "enum": ["dataset_info", "sidecar"]},
+      "title": "Metadata Sources",
+      "type": "array"
+    },
+    "license_present": {"description": "A non-empty license is declared.", "title": "License Present", "type": "boolean"},
+    "source_present": {"description": "A non-empty source/homepage is declared.", "title": "Source Present", "type": "boolean"},
+    "synthetic": {"description": "The data is declared synthetic.", "title": "Synthetic", "type": "boolean"},
+    "synthetic_validated": {
+      "description": "Synthetic data is declared validated.",
+      "title": "Synthetic Validated",
+      "type": "boolean"
+    },
+    "missing_fields": {
+      "description": "Required fields that are absent or empty.",
+      "items": {"type": "string"},
+      "title": "Missing Fields",
+      "type": "array"
+    },
+    "provenance_ok": {
+      "description": "No required field missing AND (not synthetic OR synthetic_validated).",
+      "title": "Provenance Ok",
+      "type": "boolean"
+    }
+  },
+  "required": ["license_present", "source_present", "synthetic", "synthetic_validated", "provenance_ok"],
+  "title": "ProvenanceOutput",
+  "type": "object"
+}

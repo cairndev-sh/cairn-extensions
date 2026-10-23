@@ -1,0 +1,269 @@
+format = "cairn.contracts/1"
+
+[distribution]
+name = "cairn-contracts-dataset"
+version = "1.2.0"
+
+[[definitions]]
+id = "dataset.decontam"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.decontam.json"
+
+[[definitions]]
+id = "dataset.decontam.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.decontam.input.json"
+
+[[definitions]]
+id = "dataset.decontam.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.decontam.configuration.json"
+
+[[definitions]]
+id = "dataset.decontam.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.decontam.output.json"
+
+[[definitions]]
+id = "dataset.provenance"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.provenance.json"
+
+[[definitions]]
+id = "dataset.provenance.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.provenance.input.json"
+
+[[definitions]]
+id = "dataset.provenance.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.provenance.configuration.json"
+
+[[definitions]]
+id = "dataset.provenance.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.provenance.output.json"
+
+[[definitions]]
+id = "dataset.sample"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.sample.json"
+
+[[definitions]]
+id = "dataset.sample.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.sample.input.json"
+
+[[definitions]]
+id = "dataset.sample.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.sample.configuration.json"
+
+[[definitions]]
+id = "dataset.sample.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.sample.output.json"
+
+[[definitions]]
+id = "dataset.gate"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.gate.json"
+
+[[definitions]]
+id = "dataset.gate.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.gate.input.json"
+
+[[definitions]]
+id = "dataset.gate.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.gate.configuration.json"
+
+[[definitions]]
+id = "dataset.gate.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.gate.output.json"
+
+[[definitions]]
+id = "dataset.publish_fingerprints"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.publish_fingerprints.json"
+
+[[definitions]]
+id = "dataset.publish_fingerprints.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.publish_fingerprints.input.json"
+
+[[definitions]]
+id = "dataset.publish_fingerprints.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.publish_fingerprints.configuration.json"
+
+[[definitions]]
+id = "dataset.publish_fingerprints.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.publish_fingerprints.output.json"
+
+[[definitions]]
+id = "dataset.anonymize"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.anonymize.json"
+
+[[definitions]]
+id = "dataset.anonymize.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.anonymize.input.json"
+
+[[definitions]]
+id = "dataset.anonymize.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.anonymize.configuration.json"
+
+[[definitions]]
+id = "dataset.anonymize.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.anonymize.output.json"
+
+[[definitions]]
+id = "dataset.split"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.split.json"
+
+[[definitions]]
+id = "dataset.split.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.split.input.json"
+
+[[definitions]]
+id = "dataset.split.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.split.configuration.json"
+
+[[definitions]]
+id = "dataset.split.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.split.output.json"
+
+[[definitions]]
+id = "dataset.pii_scan"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.pii_scan.json"
+
+[[definitions]]
+id = "dataset.pii_scan.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.pii_scan.input.json"
+
+[[definitions]]
+id = "dataset.pii_scan.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.pii_scan.configuration.json"
+
+[[definitions]]
+id = "dataset.pii_scan.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.pii_scan.output.json"
+
+[[definitions]]
+id = "dataset.prep_gate"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.prep_gate.json"
+
+[[definitions]]
+id = "dataset.prep_gate.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_gate.input.json"
+
+[[definitions]]
+id = "dataset.prep_gate.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_gate.configuration.json"
+
+[[definitions]]
+id = "dataset.prep_gate.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_gate.output.json"
+
+[[definitions]]
+id = "dataset.prep_review"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.prep_review.json"
+
+[[definitions]]
+id = "dataset.prep_review.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_review.input.json"
+
+[[definitions]]
+id = "dataset.prep_review.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_review.configuration.json"
+
+[[definitions]]
+id = "dataset.prep_review.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.prep_review.output.json"
+
+[[definitions]]
+id = "dataset.replay"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/dataset.replay.json"
+
+[[definitions]]
+id = "dataset.replay.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.replay.input.json"
+
+[[definitions]]
+id = "dataset.replay.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.replay.configuration.json"
+
+[[definitions]]
+id = "dataset.replay.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.replay.output.json"

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_review.output/1.0.0",
+  "properties": {
+    "reviewed": {
+      "description": "True \u2014 a human signed off (this body runs only after approval).",
+      "title": "Reviewed",
+      "type": "boolean"
+    },
+    "residual_pii_rows": {
+      "default": 0,
+      "description": "Residual PII the human accepted.",
+      "title": "Residual Pii Rows",
+      "type": "integer"
+    },
+    "note": {
+      "default": "",
+      "description": "Human-readable record of the sign-off.",
+      "title": "Note",
+      "type": "string"
+    }
+  },
+  "required": ["reviewed"],
+  "title": "PrepReviewOutput",
+  "type": "object"
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.replay.configuration/1.0.0",
+  "description": "The sampling knobs a profile may govern (ratio, strategy, seed).",
+  "type": "object",
+  "properties": {
+    "ratio": {
+      "default": 0.2,
+      "description": "Replay share of the final mix (denominator = output rows).",
+      "exclusiveMaximum": 1.0,
+      "minimum": 0.0,
+      "title": "Replay ratio",
+      "type": "number"
+    },
+    "strategy": {
+      "default": "uniform",
+      "description": "'uniform' or 'recency_weighted' (v1).",
+      "title": "Sampling strategy",
+      "type": "string"
+    },
+    "seed": {
+      "default": 0,
+      "description": "Sampling seed; same seed → same mix.",
+      "title": "Seed",
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.pii_redact.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "backend": {"type": "string", "default": "auto", "description": "auto, presidio, regex, regexset, duckdb or none."},
+    "kinds": {"type": "array", "items": {"type": "string"}, "description": "duckdb backend: the regex kinds to apply."},
+    "preset": {"type": "string", "enum": ["governed", "logs"], "description": "Cascade preset."},
+    "ner": {"type": ["boolean", "null"], "description": "Run the NER tier."},
+    "model": {"type": ["string", "null"], "enum": ["blank", "sm", "lg", null], "description": "spaCy model size."},
+    "n_process": {"type": ["integer", "null"], "description": "NER worker processes."},
+    "analyze_chunk": {"type": ["integer", "null"], "description": "Rows per analyze batch."}
+  },
+  "additionalProperties": false
+}

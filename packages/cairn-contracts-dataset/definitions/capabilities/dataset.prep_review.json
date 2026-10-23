@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.prep_review",
+  "revision": "1.0.0",
+  "summary": "The human sign-off on a scrub that still carries residual PII: runs only after the approval gate releases it (requires_approval) and records the review.",
+  "input": "contract://dataset.prep_review.input/1.0.0",
+  "configuration": "contract://dataset.prep_review.configuration/1.0.0",
+  "output": "contract://dataset.prep_review.output/1.0.0"
+}

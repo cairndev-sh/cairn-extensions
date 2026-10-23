@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.decontam.input/1.0.0",
+  "properties": {
+    "path": {"description": "Path to the TRAINING JSONL dataset.", "title": "Path", "type": "string"},
+    "eval_path": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "Eval / benchmark JSONL to check contamination against. If omitted, the check is skipped (checked=false) rather than failing.",
+      "title": "Eval Path"
+    },
+    "normalize": {
+      "default": true,
+      "description": "Whitespace-collapse before hashing (must match dedup's setting).",
+      "title": "Normalize",
+      "type": "boolean"
+    },
+    "method": {
+      "default": "exact",
+      "description": "Contamination method: 'exact' (default \u2014 canonical_hash byte-identical match), 'ngram' (word n-gram/shingle Jaccard overlap \u2014 also catches reworded/near-duplicate leaks), 'both' (union of the exact and n-gram row sets), or 'minhash' (MinHash+LSH approximate Jaccard overlap via datasketch \u2014 the scalable near-dup path for large corpora, catching paraphrased leakage without the O(train x eval) all-pairs shingle comparison; needs the [minhash] extra).",
+      "title": "Method",
+      "type": "string"
+    },
+    "ngram": {
+      "default": 13,
+      "description": "Shingle window size in words, used when method is 'ngram', 'both' or 'minhash'. 13 matches common near-dup-detection defaults (e.g. GPT-3/RedPajama-style decontamination window sizes).",
+      "title": "Ngram",
+      "type": "integer"
+    },
+    "overlap_threshold": {
+      "default": 0.8,
+      "description": "Jaccard similarity (0-1) at/above which a training row is flagged as near-duplicate contamination, used when method is 'ngram', 'both' or 'minhash' (the MinHash estimate for 'minhash').",
+      "title": "Overlap Threshold",
+      "type": "number"
+    },
+    "num_perm": {
+      "default": 128,
+      "description": "MinHash permutation count (signature length) \u2014 higher is more accurate but slower. Used only when method='minhash'.",
+      "title": "Num Perm",
+      "type": "integer"
+    }
+  },
+  "required": ["path"],
+  "title": "DecontamInput",
+  "type": "object"
+}

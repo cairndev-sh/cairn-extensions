@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.gate",
+  "revision": "1.0.0",
+  "summary": "The deterministic readiness verdict: check findings against governance thresholds -> pass | warn | fail with cited blocking reasons and warnings. Pure: no I/O, no LLM.",
+  "input": "contract://dataset.gate.input/1.0.0",
+  "configuration": "contract://dataset.gate.configuration/1.0.0",
+  "output": "contract://dataset.gate.output/1.0.0"
+}

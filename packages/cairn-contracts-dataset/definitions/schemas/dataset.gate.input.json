@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.gate.input/1.0.0",
+  "$defs": {
+    "GateThresholds": {
+      "additionalProperties": false,
+      "description": "Severity thresholds. Defaults match the design (\u00a75.3). Deployment-tunable\nvia the profile (ADR-0068, #742): the operator exposes these through\n``GateConfig`` (its ``config_schema``), so ``[profile.config.\"dataset/gate\"\n.thresholds]`` overrides them per environment. The ``title``/bounds drive\n``cairn config scaffold`` and the console Guardrails form.",
+      "properties": {
+        "format_min_conformant_pct": {
+          "default": 99.0,
+          "description": "Rows must parse into a trainer-accepted format. Below this %, the dataset is BLOCKED.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Minimum format conformance",
+          "type": "number"
+        },
+        "decontam_max_overlap_pct": {
+          "default": 5.0,
+          "description": "Above this % contamination between train and eval, the dataset is BLOCKED.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max train/eval overlap",
+          "type": "number"
+        },
+        "refusal_warn_pct": {
+          "default": 20.0,
+          "description": "Above this % of refusal-style responses, WARN (non-blocking).",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Refusal-ratio warn threshold",
+          "type": "number"
+        },
+        "short_warn_frac": {
+          "default": 0.05,
+          "description": "Above this fraction of too-short responses, WARN (non-blocking).",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Too-short-response warn fraction",
+          "type": "number"
+        }
+      },
+      "title": "GateThresholds",
+      "type": "object",
+      "$comment": "scope: governance (ADR-0070) - env-owned; a run-supplied value is stripped (#905)"
+    }
+  },
+  "description": "Findings the six deterministic checks wrote to ``state.findings``.\n\nEvery field is optional: a check that did not run leaves its inputs unset,\nand the gate simply skips that dimension rather than failing.",
+  "properties": {
+    "format_conformant_pct": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": null, "title": "Format Conformant Pct"},
+    "format_trainer_compat": {"additionalProperties": {"type": "boolean"}, "title": "Format Trainer Compat", "type": "object"},
+    "dedup_pct": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": null, "title": "Dedup Pct"},
+    "dedup_effective_size": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "title": "Dedup Effective Size"},
+    "decontam_checked": {"default": false, "title": "Decontam Checked", "type": "boolean"},
+    "decontam_overlap_pct": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": null, "title": "Decontam Overlap Pct"},
+    "pii_counts": {"additionalProperties": {"type": "integer"}, "title": "Pii Counts", "type": "object"},
+    "pii_rows": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "title": "Pii Rows"},
+    "profile_refusal_pct": {"anyOf": [{"type": "number"}, {"type": "null"}], "default": null, "title": "Profile Refusal Pct"},
+    "profile_short": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "title": "Profile Short"},
+    "profile_total": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null, "title": "Profile Total"},
+    "prov_ok": {"anyOf": [{"type": "boolean"}, {"type": "null"}], "default": null, "title": "Prov Ok"},
+    "prov_missing": {"items": {"type": "string"}, "title": "Prov Missing", "type": "array"},
+    "dataset_uri": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "title": "Dataset Uri"},
+    "thresholds": {"$ref": "#/$defs/GateThresholds"}
+  },
+  "title": "GateInput",
+  "type": "object"
+}

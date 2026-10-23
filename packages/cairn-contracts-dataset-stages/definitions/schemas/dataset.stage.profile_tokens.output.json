@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.profile_tokens.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {"type": "integer", "minimum": 0, "description": "Rows kept (read by intake)."},
+    "tokens_total": {"type": "integer", "minimum": 0, "description": "Total tokens (read by intake)."},
+    "tokens_p50": {"type": "integer", "minimum": 0, "description": "Median row length."},
+    "tokens_p95": {"type": "integer", "minimum": 0, "description": "p95 row length."},
+    "tokens_max": {"type": "integer", "minimum": 0, "description": "Longest row."},
+    "token_backend": {"type": "string", "description": "tokenizers, or whitespace word counts (read by intake)."},
+    "token_backend_note": {"type": "string", "description": "Why whitespace counts were used."},
+    "tokenizer": {"type": "string", "description": "The tokenizer named."},
+    "max_seq_len": {"type": "integer", "minimum": 0, "description": "The limit applied."},
+    "over_length_rows": {"type": "integer", "minimum": 0, "description": "Rows above max_seq_len (read by intake)."},
+    "over_length_policy": {"type": "string", "description": "The policy applied (read by intake)."},
+    "quarantined_rows": {"type": "integer", "minimum": 0, "description": "Lines that were not JSON objects."}
+  },
+  "required": ["rows", "tokens_total", "tokens_p50", "tokens_p95", "tokens_max", "token_backend", "tokenizer", "max_seq_len", "over_length_rows", "over_length_policy", "quarantined_rows"]
+}

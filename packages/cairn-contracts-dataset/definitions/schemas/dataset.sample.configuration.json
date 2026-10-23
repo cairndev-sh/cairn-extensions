@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.sample.configuration/1.0.0",
+  "additionalProperties": false,
+  "description": "Deployment-tunable knobs of ``dataset/sample`` (ADR-0070) \u2014 the sample size.\n**Operational** scope (the default): a workflow/run may tune this freely. A\nsubset of ``SampleInput``; the safe default lives on ``SampleInput``.",
+  "properties": {
+    "n": {
+      "default": 20,
+      "description": "How many (input, output) pairs to sample.",
+      "title": "Sample size",
+      "type": "integer"
+    }
+  },
+  "title": "SampleConfig",
+  "type": "object"
+}

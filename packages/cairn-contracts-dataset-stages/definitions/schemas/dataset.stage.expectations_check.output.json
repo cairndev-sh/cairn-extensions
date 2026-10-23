@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.expectations_check.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "verdict": {"type": "string", "enum": ["pass", "degrade", "block"], "description": "Suite verdict (read by intake)."},
+    "total": {"type": "integer", "minimum": 0, "description": "Expectations evaluated."},
+    "passed": {"type": "integer", "minimum": 0, "description": "Expectations passed."},
+    "failed": {"type": "integer", "minimum": 0, "description": "Expectations failed."},
+    "suite": {"type": "string", "description": "Suite name (read by intake)."},
+    "declared": {"type": "boolean", "description": "False when no suite was declared."},
+    "rows": {"type": "integer", "minimum": 0, "description": "Rows evaluated."},
+    "engine": {"type": "string", "description": "The suite engine."},
+    "sampled": {"type": "boolean", "description": "True when the read was truncated at sample_limit."},
+    "failures_json": {"type": "string", "description": "The failed expectations as one JSON array string (read by intake)."}
+  },
+  "required": ["verdict", "total", "passed", "failed", "suite", "declared", "rows", "engine", "sampled"]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.prep_gate.output/1.0.0",
+  "properties": {
+    "action": {
+      "description": "pass = proceed; block = fail-closed; review = route to HITL.",
+      "enum": ["pass", "block", "review"],
+      "title": "Action",
+      "type": "string"
+    },
+    "verdict": {
+      "description": "fail = a dirty scrub was ENFORCED (block/hitl); warn = 0 PII found but the scan can't CERTIFY clean (sampled or non-NER backend, #889); else pass.",
+      "enum": ["pass", "warn", "fail"],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "clean": {"description": "post_scrub_pii_rows == 0 (found no PII).", "title": "Clean", "type": "boolean"},
+    "verified": {
+      "description": "#889 \u2014 clean is a GUARANTEE: 0 PII AND a full scan (not sampled) AND a certifying NER backend. A consumer/pipeline gates on THIS, not `clean`.",
+      "title": "Verified",
+      "type": "boolean"
+    },
+    "blocking": {
+      "description": "Cited reason when the gate blocks / warns / holds for review.",
+      "items": {"type": "string"},
+      "title": "Blocking",
+      "type": "array"
+    },
+    "outcome": {"items": {"additionalProperties": true, "type": "object"}, "title": "Outcome", "type": "array"}
+  },
+  "required": ["action", "verdict", "clean", "verified"],
+  "title": "PrepGateOutput",
+  "type": "object"
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.replay.input/1.0.0",
+  "type": "object",
+  "properties": {
+    "new_rows_path": {
+      "description": "The cycle's fresh train slice (local path or resolved URI).",
+      "title": "New Rows Path",
+      "type": "string"
+    },
+    "out_path": {
+      "description": "Where to write the mixed JSONL dataset.",
+      "title": "Out Path",
+      "type": "string"
+    },
+    "sources": {
+      "description": "Prior-cycle replay sources, OLDEST first. Each entry is a resolved dataset URI or a local path; a launch-resolved 'dataset:<name>@<v>' ref arrives here as 'uri#sha256=<hash>' and the fragment is stripped before reading (#1466).",
+      "items": {
+        "type": "string"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "ratio": {
+      "default": 0.2,
+      "description": "Replay share of the FINAL MIX — the denominator is the OUTPUT row count, not the new-row count. 0.2 means replay rows are ~20% of the rows written (new_rows * ratio/(1-ratio) replay rows). When the sources cannot fill the quota the op takes everything available and reports the true ratio_actual.",
+      "exclusiveMaximum": 1.0,
+      "minimum": 0.0,
+      "title": "Ratio",
+      "type": "number"
+    },
+    "strategy": {
+      "default": "uniform",
+      "description": "How the replay quota is spread across `sources` — an OPEN enum (ADR-0095 Amendment 1 item 2). Implemented: 'uniform' (each source's share is proportional to its eligible row count, i.e. every prior row is equally likely) and 'recency_weighted' (share proportional to position+1, so LATER entries in `sources` — the more recent cycles — get more of the quota). RESERVED for v2, rejected with a clear error until #1626 lands the per-row/per-version eval history they need: 'hard_example' (rows the current model gets wrong) and 'forgetting_aware' (rows whose score degraded between adapter versions).",
+      "title": "Strategy",
+      "type": "string"
+    },
+    "seed": {
+      "default": 0,
+      "description": "Seed for ALL sampling. Same inputs + same seed → byte-identical output, so the mix is reproducible from the receipt.",
+      "title": "Seed",
+      "type": "integer"
+    },
+    "dedup_against_new": {
+      "default": true,
+      "description": "Drop replay rows that exactly duplicate a new row (the pack's canonical row hash — the same notion of 'the same example' dataset/dedup uses).",
+      "title": "Dedup Against New",
+      "type": "boolean"
+    },
+    "normalize": {
+      "default": true,
+      "description": "Collapse whitespace before hashing for dedup_against_new (matches dataset/dedup).",
+      "title": "Normalize",
+      "type": "boolean"
+    },
+    "eval_report": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "RESERVED (ADR-0095 Amendment 1 item 2): the eval/forgetting (#1626) report the v2 'hard_example' / 'forgetting_aware' strategies will score candidate rows against. Accepted now so v2 is additive; ignored by the v1 strategies.",
+      "title": "Eval Report"
+    }
+  },
+  "required": [
+    "new_rows_path",
+    "out_path"
+  ]
+}

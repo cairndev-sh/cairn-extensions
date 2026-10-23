@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "dataset.sample",
+  "revision": "1.0.0",
+  "summary": "Deterministic, evenly-spaced (input, output) sample of a JSONL dataset (the LLM-as-judge feed): the same dataset gives the same sample.",
+  "input": "contract://dataset.sample.input/1.0.0",
+  "configuration": "contract://dataset.sample.configuration/1.0.0",
+  "output": "contract://dataset.sample.output/1.0.0"
+}

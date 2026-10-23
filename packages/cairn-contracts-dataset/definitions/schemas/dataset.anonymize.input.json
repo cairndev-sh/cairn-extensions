@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.anonymize.input/1.0.0",
+  "properties": {
+    "path": {"description": "Path to the source JSONL dataset.", "title": "Path", "type": "string"},
+    "output_path": {"description": "Where to write the redacted JSONL dataset.", "title": "Output Path", "type": "string"},
+    "backend": {
+      "default": "auto",
+      "description": "'auto' (presidio if installed, else regex) | 'regex' | 'regexset' (single-pass re2, [fastpii] extra) | 'presidio' | 'cascade'.",
+      "title": "Backend",
+      "type": "string"
+    },
+    "preset": {
+      "default": "governed",
+      "description": "Ready-made redaction configuration; settings below override it. 'governed' (default) = NER + regex + secrets (redacts names, locations, emails, phones, cards, API keys). 'logs' = regex + secrets only (no name/location redaction) \u2014 faster/lighter, for log/trace data. Redaction always processes every row (it cannot sample).",
+      "enum": ["governed", "logs"],
+      "title": "Preset",
+      "type": "string"
+    },
+    "ner": {
+      "anyOf": [{"type": "boolean"}, {"type": "null"}],
+      "default": null,
+      "description": "Redact names & locations (PERSON/LOCATION/ORGANIZATION) via the language model. OFF = redact only pattern PII (emails, phones, cards, secrets) \u2014 faster/lighter but names are left in. Keep ON for training data. null = preset's value.",
+      "title": "Ner"
+    },
+    "model": {
+      "anyOf": [{"enum": ["blank", "sm", "lg"], "type": "string"}, {"type": "null"}],
+      "default": null,
+      "description": "spaCy model used to find names/locations to redact (ignored when NER is off). 'sm' = fast, ~550 MB; 'lg' = highest recall, ~1.2-1.7 GB; 'blank' = no NER. null = preset's model.",
+      "title": "Model"
+    },
+    "n_process": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": null,
+      "description": "CPU workers sharing the redaction pass. 0 = auto (all cores; ~40% faster on 2 CPUs). 1 = single process (lowest RAM). Capped at the core count. null = preset's value.",
+      "title": "N Process"
+    },
+    "analyze_chunk": {
+      "anyOf": [{"type": "integer"}, {"type": "null"}],
+      "default": null,
+      "description": "Rows fed to the detector at once. Larger = parallel workers stay busy; smaller = less memory. ~2048 is a good default. null = preset's value.",
+      "title": "Analyze Chunk"
+    },
+    "kinds": {
+      "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
+      "default": null,
+      "description": "Subset of recognizers/entities to redact (default: all).",
+      "title": "Kinds"
+    },
+    "text_fields": {
+      "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}],
+      "default": null,
+      "description": "Top-level field name(s) holding the training TEXT to redact (e.g. ['source_text'] or ['messages']). null = auto: redact free-text leaves in every field, skipping short whitespace-free strings (tokens, labels, ids, chat roles) so a tokenized/labelled dataset isn't NER'd per token (#1021). Non-selected fields are copied through untouched.",
+      "title": "Text Fields"
+    }
+  },
+  "required": ["path", "output_path"],
+  "title": "AnonymizeInput",
+  "type": "object"
+}

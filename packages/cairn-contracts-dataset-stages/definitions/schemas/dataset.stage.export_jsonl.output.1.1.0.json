@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.export_jsonl.output/1.1.0",
+  "type": "object",
+  "properties": {
+    "output": {
+      "type": "string",
+      "description": "Path or s3:// URI of the export."
+    },
+    "format": {
+      "const": "jsonl",
+      "description": "Always jsonl."
+    },
+    "store": {
+      "type": "string",
+      "description": "Where the export landed."
+    },
+    "content_hash": {
+      "type": "string",
+      "description": "sha256 of the exported bytes."
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size of the export."
+    },
+    "register_as": {
+      "type": "string",
+      "description": "Echo of the registration request."
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows exported; the intake verdict reads it as rows_out \u2014 0 is invalid_format (ADR-0102 D1, #2396)."
+    }
+  },
+  "required": [
+    "output",
+    "format",
+    "store",
+    "content_hash",
+    "bytes",
+    "rows"
+  ]
+}
