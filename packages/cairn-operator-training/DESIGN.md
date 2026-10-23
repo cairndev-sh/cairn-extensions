@@ -157,6 +157,17 @@ here stay legacy until their pipelines' slices. Proof: `tests/core/test_retrain_
 **Per-run bounds live in `TrainSpec`.** Which GPU a run gets is the environment's (the profile's
 `ml_target`), never a run input.
 
+**Accounts (cairn 0.2.0, sign-in on).** cairn resolves a run's connections and declared secrets in
+the account that owns the run's workspace. Two consequences for this wheel:
+
+- A profile-bound `ml_target` names a deployment connection. A team account's leg does not see
+  it, so the account needs a `compute.ssh` connection of the same name, or the leg fails.
+- This wheel declares no `secrets:`. A team account's declared secrets reach `ctx.secrets` only
+  and are never written to the process environment, so `HF_TOKEN`, `WANDB_*` and `AWS_*` read from
+  the environment are whatever the control-plane process or the box holds: the deployment's own
+  values, or none, for every account. Follow-up: declare them as `secrets:` and read them from
+  `ctx.secrets`, so a team account's run uses that account's credentials.
+
 ## 5. Governance
 
 `train/local` and `train/stub` are `read_only` (nothing leaves the host). The flow stages that write

@@ -261,6 +261,14 @@ no connection. Object storage uses the ambient AWS credential chain; with none, 
 `dataset/publish_fingerprints` **degrades** with no store (`skipped: store_unavailable`);
 `dataset/split`'s `register_as` **fails closed**.
 
+**Accounts and workspaces (cairn 0.2.0, sign-in on).** No operator here declares `secrets:`. A
+team account's declared secrets reach `ctx.secrets` only and are never written to the process
+environment, so the ambient AWS credential chain this pack uses for `s3://` is the control-plane
+process's or the box's: the deployment's own credentials, or none, for every account. Follow-up:
+declare the object-store credentials as `secrets:` so a team account's run uses its own. Dataset
+registry reads and writes (`dataset/split`'s `register_as` / `parent_ref`) are scoped to the
+workspace in scope; see §6.
+
 ## 5. Governance
 
 * `read_only` — every check, every verdict, plus `dataset/publish_fingerprints`, which
@@ -299,6 +307,7 @@ dropped, not honoured.
 | A `dataset:` ref reached the box unresolved | the launch-time resolver only rewrote top-level STRINGS, so `dataset/replay`'s list of `sources` passed through untouched | the resolver and its gate now share one predicate | yes (#1625) |
 | Sharded near-dup missed a cross-shard pair | signatures clustered per shard | `cluster_signatures` clusters every signature once, globally | yes (#962) |
 | `s3://` read returns nothing | absent AWS credentials | raises at read | yes — never an empty dataset that reads as "clean" |
+| `dataset/split` children registered with no parent lineage | since cairn 0.2.0 the registry reads (`get_dataset_version_meta`) and writes (`register_dataset_version`) are workspace-scoped: they answer in the workspace in scope (the request's or the run's), else the process default (`CAIRN_WORKSPACE`, then `default`). A parent registered in another workspace reads as unregistered | the children register in the run's workspace with no `parent_version` and no lineage parent; `parent_ref` to another workspace's version reads as not registered the same way | no — a split of an unregistered parent still produces children (by design); register the parent in the workspace that runs the split |
 | A golden set registered without human ratings | none — refused at the registry write | `DatasetRoleError` naming the unrated rows | yes (#2020) |
 | Near-duplicates survived every import | `dedup_minhash` existed as an operator nobody had wired into the default chain, so only byte-identical rows were dropped | `dedup.near` is in the default admission chain; `dropped_near` is reported beside `dropped_exact` | no — an honest skip without `[minhash]`, never a failed import (#2021) |
 | `checked: true` on a contamination pass that compared against nothing useful | the flow's single `eval_path` was whatever the author remembered to pass | `eval_paths` defaults control-side to every `golden`/`test` version in the workspace; `eval_sets` names what was ACTUALLY read, and a probe that would not read is left out of it | reported (#2021) |

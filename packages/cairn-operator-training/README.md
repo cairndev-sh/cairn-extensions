@@ -19,9 +19,17 @@ proven (clouds, Kubernetes, RunPod, Vast).
 
 ## Install
 
+This wheel and the contract wheels it pins are not on PyPI yet. Until they are, install from a
+checkout of this repository, into the environment `cairndev` 0.2.x runs in:
+
 ```bash
-pip install cairn-operator-training          # the control plane: no torch, no CUDA
-pip install 'cairn-operator-training[gpu]'   # a CUDA box the ssh engine runs the trainer on
+git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
+# the control plane: no torch, no CUDA
+pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
+  ./packages/cairn-operator-training
+# a CUDA box the ssh engine runs the trainer on
+pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
+  './packages/cairn-operator-training[gpu]'
 ```
 
 | Extra | What it is for |
@@ -50,5 +58,11 @@ each row will name the `cairndev` release it was proven on as it is re-run.
 Where a run goes is the engine's: an ssh GPU box (`cairn connect add ssh`, profile
 `ml_engine = "builtin"`, `ml_target = "<connection>"`) is the proven path; the box installs
 `cairn-operator-training[gpu]`. Design notes: [`DESIGN.md`](DESIGN.md).
+
+**With sign-in on (cairn 0.2.0 and later).** A profile-bound `ml_target` names a connection of
+the deployment (the `default` account). A team account's leg does not use the deployment's
+connections, so it needs a `compute.ssh` connection of that name in its own account, or the leg
+fails. Credentials this wheel reads from the environment (`HF_TOKEN`, `WANDB_*`, `AWS_*`) are not
+declared as `secrets:`; see [`DESIGN.md`](DESIGN.md) §4.
 
 Apache-2.0 — see [`LICENSE`](LICENSE).
