@@ -23,9 +23,16 @@ share one row vocabulary:
 
 ## Install
 
+This wheel and the contract wheels it pins are not on PyPI yet. Until they are, install from a
+checkout of this repository, into the environment `cairndev` 0.2.x runs in:
+
 ```bash
-pip install cairn-operator-dataset-checks
-pip install 'cairn-operator-dataset-checks[pii,minhash,tokenizers,split]'
+git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
+pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-dataset-stages \
+  ./packages/cairn-operator-dataset-checks
+# with every optional backend
+pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-dataset-stages \
+  './packages/cairn-operator-dataset-checks[pii,minhash,tokenizers,split]'
 ```
 
 Every heavy dependency is an extra with an honest fallback, so a base install runs the whole

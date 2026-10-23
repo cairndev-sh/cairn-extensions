@@ -17,10 +17,51 @@ The engine, the builtin operator packs and the core contracts live in
 |---|---|
 | `packages/cairn-operator-<name>/` | operator packs, one wheel each |
 | `packages/cairn-contracts-<name>/` | the domain contracts those packs implement (data only) |
-| `packs/cairn-pack-<name>/` | domain packs: pipelines, flows, profiles and presets, no code |
-| `docs/` | a README per package where it outgrows the package (architecture docs are the core's) |
 | `scripts/` | the checks CI runs and the catalog generator |
 | `tests/` | the checks' own tests |
+
+Domain packs (`packs/cairn-pack-<name>/`: pipelines, flows, profiles and presets, no code) will
+live beside them; none is on `main` yet.
+
+## Packages
+
+| Package | What | Contracts it implements |
+|---|---|---|
+| [`cairn-operator-dataset-checks`](packages/cairn-operator-dataset-checks/README.md) | dataset readiness checks, cleaning stages and splits | `cairn-contracts-dataset`, `cairn-contracts-dataset-stages` |
+| [`cairn-operator-training`](packages/cairn-operator-training/README.md) | SFT with LoRA / QLoRA, DPO and distillation | `cairn-contracts-training`, `cairn-contracts-training-stages` |
+
+## Install
+
+The operator packs require `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`). No package is on PyPI yet; until
+they are, install from a checkout, into the environment `cairndev` runs in, each operator pack
+together with the contract wheels it pins:
+
+```bash
+git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
+pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-dataset-stages \
+  ./packages/cairn-operator-dataset-checks
+pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
+  ./packages/cairn-operator-training
+cairn doctor && cairn pack check
+```
+
+Each package README lists its extras.
+
+### With sign-in on (cairn 0.2.0 and later)
+
+With sign-in on, cairn scopes connections and secrets to the account that owns the run's
+workspace. Two consequences for these packages:
+
+- **Engine targets.** A connection bound in the deployment's profile (`ml_target`,
+  `dataflow_target`) belongs to the deployment, and a team account's flow legs cannot use it.
+  Connection names are unique across a deployment, so a team account creates a target connection
+  under its own name (the console suggests `<account>-<provider>`) and names it in its pipelines
+  or flows.
+- **Credentials.** A team account's run receives the secrets an operator declares (`secrets:`)
+  from its own connections, in `ctx.secrets`; it does not receive its account's credentials in the
+  process environment. These packages do not declare `secrets:` yet: credentials they read from the
+  environment (`HF_TOKEN`, `WANDB_*`, `AWS_*`) are whatever the process or the box holds, for
+  every account. See each package's `DESIGN.md`.
 
 ## Developing
 
@@ -46,7 +87,9 @@ tests declares them in a `test` extra, which CI installs.
 
 ## Status
 
-The first extensions are landing: see the issues.
+Two operator packs and their four contract wheels are on `main`, tested in CI against the
+released `cairndev` 0.2.x. Their support tables (in each package README) say which paths have
+been re-proven on a public release. Domain packs and PyPI releases are next: see the issues.
 
 ## License
 
