@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "train.teardown",
+  "revision": "1.0.0",
+  "summary": "Cancel every still-running managed training job this run or output name registered in the durable remote-job store: the finalizer that stops a pod from billing after the control plane lost the leg.",
+  "input": "contract://train.teardown.input/1.0.0",
+  "configuration": "contract://train.teardown.configuration/1.0.0",
+  "output": "contract://train.teardown.output/1.0.0"
+}

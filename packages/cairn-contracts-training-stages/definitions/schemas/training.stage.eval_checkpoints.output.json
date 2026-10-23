@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.eval_checkpoints.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "evaluated": {
+      "type": "boolean",
+      "description": "Always true: the stage ran."
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "Training succeeded and no ceiling was exceeded."
+    },
+    "train_loss": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "The train_loss judged."
+    },
+    "eval_loss": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "The eval_loss judged."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why it was rejected; empty when passed."
+    }
+  },
+  "required": [
+    "evaluated",
+    "passed",
+    "reason"
+  ]
+}

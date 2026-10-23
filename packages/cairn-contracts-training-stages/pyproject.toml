@@ -1,0 +1,32 @@
+# Stage contracts for the training domain's flow kernels (#158, ADR-0118): DATA ONLY — no
+# Python package, no entry points. The wheel carries `cairn_contracts/cairn-contracts-training-stages/` (descriptor + stage
+# definitions + schemas), which `cairn.core.pack.contracts.resolve_contracts` discovers from installed
+# metadata. The root installs it NON-editable (`{ workspace = true, editable = false }`).
+[project]
+name = "cairn-contracts-training-stages"
+version = "1.0.0"
+description = "Shared stage contracts for the training domain's ml-flow kernels (sample.fidelity, train.qlora, eval.checkpoints, package.adapter)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+license = { text = "Apache-2.0" }
+# The core's contract resolver admits only cairn_contracts/<name>/ and files directly in
+# *.dist-info/ (a data-only wheel); a license file would land in *.dist-info/licenses/.
+# LICENSE and NOTICE stay in this directory and the sdist.
+license-files = []
+authors = [{name = "cairn maintainers"}]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"definitions" = "cairn_contracts/cairn-contracts-training-stages"

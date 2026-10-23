@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.sample_fidelity.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "fidelity_sampled": {
+      "type": "boolean",
+      "description": "Whether a subsample replaced the corpus for this run."
+    },
+    "fidelity_n": {
+      "type": "integer",
+      "description": "Rows kept.",
+      "minimum": 0
+    },
+    "fidelity_total": {
+      "type": "integer",
+      "description": "Rows in the corpus.",
+      "minimum": 0
+    },
+    "fidelity_rows": {
+      "type": "integer",
+      "description": "The rows knob as set.",
+      "minimum": 0
+    },
+    "fidelity_fraction": {
+      "type": "number",
+      "description": "The fraction knob as set."
+    },
+    "fidelity_seed": {
+      "type": "integer",
+      "description": "The seed used."
+    },
+    "fidelity_digest": {
+      "type": "string",
+      "description": "Order-independent digest of the kept rows' hashes; empty when not sampled."
+    },
+    "skipped": {
+      "type": "boolean",
+      "description": "True when no fidelity was set (nothing read, nothing written)."
+    },
+    "output": {
+      "type": "string",
+      "description": "The subsampled JSONL, when sampled."
+    }
+  },
+  "required": [
+    "fidelity_sampled",
+    "fidelity_n",
+    "fidelity_total",
+    "fidelity_seed",
+    "fidelity_digest"
+  ]
+}

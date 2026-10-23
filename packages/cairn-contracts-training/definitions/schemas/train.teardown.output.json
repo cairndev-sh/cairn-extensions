@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://train.teardown.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "cancelled": {
+      "default": 0,
+      "description": "Number of active managed jobs cancelled.",
+      "title": "Cancelled",
+      "type": "integer"
+    },
+    "job_ids": {
+      "description": "Provider job ids cancelled.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Job Ids",
+      "type": "array"
+    },
+    "scanned": {
+      "default": 0,
+      "description": "Active managed jobs that matched the selector.",
+      "title": "Scanned",
+      "type": "integer"
+    },
+    "errors": {
+      "description": "Per-job cancel failures — recorded, never raised: a teardown that fails is worse than one that reports.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Errors",
+      "type": "array"
+    }
+  }
+}

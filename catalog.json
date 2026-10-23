@@ -2,5 +2,30 @@
   "schema": 1,
   "channel": "official",
   "generated_from": "cairn-extensions packs (do not edit by hand)",
-  "entries": []
+  "entries": [
+    {
+      "ref": "cairn-operator-training",
+      "kind": "operator_pack",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "One SFT trainer: Unsloth QLoRA/LoRA as flow stages an engine runs on a GPU box, plus the stub and CPU/MPS local trainers.",
+      "operators": [
+        "compress/distill",
+        "train/local",
+        "train/stub"
+      ],
+      "provides": [
+        "compress.distill",
+        "train.run"
+      ],
+      "executors": [
+        "in_process"
+      ],
+      "gpu": true,
+      "install": {
+        "index": "pypi",
+        "name": "cairn-operator-training"
+      }
+    }
+  ]
 }

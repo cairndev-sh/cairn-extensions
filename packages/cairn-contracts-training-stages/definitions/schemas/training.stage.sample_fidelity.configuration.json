@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://training.stage.sample_fidelity.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "dataset_uri": {
+      "type": "string",
+      "description": "The corpus to subsample; the upstream artifact when unset."
+    },
+    "fidelity_rows": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Keep this many rows (0 = unset)."
+    },
+    "fidelity_fraction": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Keep this fraction of rows (0 = unset)."
+    },
+    "fidelity_seed": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Sampling seed; the same seed reproduces the digest."
+    },
+    "rows": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Unprefixed alias of fidelity_rows."
+    },
+    "fraction": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Unprefixed alias of fidelity_fraction."
+    },
+    "seed": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ],
+      "description": "Unprefixed alias of fidelity_seed."
+    }
+  },
+  "additionalProperties": false
+}

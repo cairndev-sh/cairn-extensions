@@ -1,0 +1,9 @@
+{
+  "format": "cairn.capability/1",
+  "id": "train.run",
+  "revision": "1.0.0",
+  "summary": "Fine-tune a base model on a dataset and produce an adapter: one TrainSpec in, one TrainResult out. Several providers implement it (stub, local, modal, kaggle, runpod, vast); a pipeline leg or a profile binding picks which. The paid ones are remote jobs under the managed-leg lifecycle; stub is hermetic.",
+  "input": "contract://train.run.input/1.0.0",
+  "configuration": "contract://train.run.configuration/1.0.0",
+  "output": "contract://train.run.output/1.0.0"
+}

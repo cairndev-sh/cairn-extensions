@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cairn-operator-training"
+version = "0.1.0"
+description = "SFT for cairn: one Unsloth QLoRA/LoRA trainer as flow stages (sft-train, DPO, distill) that an engine runs on a CUDA GPU box, plus the stub and CPU/MPS local trainers."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{name = "cairn maintainers"}]
+requires-python = ">=3.12"
+# Light by design: the heavy trainer env (torch/unsloth/trl/peft/bitsandbytes) is the
+# `[gpu]` extra, installed on the GPU box an engine runs the stages on, never on the
+# control plane. The base install is the
+# engine range this pack is proven on (ADR-0128 D3: bounded, the same range as `[compat]`)
+# and the two contract wheels it implements, pinned exactly.
+dependencies = [
+    "cairndev>=0.2.0,<0.3",
+    "cairn-contracts-training==1.0.0",
+    "cairn-contracts-training-stages==1.0.0",
+]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Documentation = "https://docs.cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[project.optional-dependencies]
+track-mlflow = ["mlflow>=2.14"]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
+test = ["moto[s3]>=5", "huggingface_hub>=0.20", "pyyaml>=6"]
+# train/local — real LoRA SFT on CPU/MPS (no GPU). Plain LoRA, no bitsandbytes/unsloth.
+# #1622: these MIRROR the canonical trainer pins in
+# src/operator_training/images.py::TRAINER_PINS — a strict subset (unsloth and
+# bitsandbytes are CUDA-only, so the CPU mock cannot carry them). Ranges, not
+# `==`: the mock does not need bit-exactness, but it must not drift a MAJOR away
+# from the GPU trainer or it stops exercising the same trl/transformers API.
+# The floors are the pins; tests/test_trainer_pins.py fails if they diverge.
+local = ["torch>=2.11,<2.12", "transformers>=5.5,<5.6", "peft>=0.20,<0.21", "trl>=0.24,<0.25", "datasets>=4.3,<4.4", "accelerate>=1.14,<2"]
+# gpu — the Unsloth QLoRA trainer on a CUDA box (the ssh engine's venv mode): EXACTLY
+# images.py::TRAINER_PINS, `==` each, so a box installed from this extra runs the same
+# trainer environment every time. tests/test_trainer_pins.py holds the two equal.
+gpu = ["torch==2.11.0", "unsloth==2026.8.21", "unsloth_zoo==2026.8.15", "trl==0.24.0", "peft==0.20.0", "transformers==5.5.0", "datasets==4.3.0", "bitsandbytes==0.50.1", "accelerate==1.14.0"]
+
+# On-box trainer CLI for the train/remote path: `remote/exec` SSH-dispatches this
+# to a box that has `cairn-operator-training[local]` installed (the box does the torch
+# training; cairn stays the orchestrator).
+[project.scripts]
+cairn-train-local = "operator_training.local_entry:_cli"
+
+[project.entry-points."cairn.operators"]
+"train/stub"     = "operator_training.operators.stub:StubTrainOp"
+"train/local"    = "operator_training.operators.local:LocalTrainOp"
+# compress/distill lives HERE, not in cairn-operator-compress: it reuses train_entry's
+# adapter-save / MLflow / checkpoint helpers and cross-pack imports are not
+# allowed. The capability is compression, hence the name (the cairn-operator-eval
+# precedent, which provides model/* and rag/*).
+"compress/distill" = "operator_training.operators.distill:CompressDistillOp"
+
+# ML-flow kernels (ADR-0082 D7, #1074) — the engine-neutral flow-stage group;
+# builtin/SSH/Metaflow/SkyPilot engines all resolve these same callables.
+[project.entry-points."cairn.flow_stages"]
+# #2029 — the fidelity knob: a deterministic, recorded subsample BEFORE the
+# train stage; a no-op when no fidelity is set. NOT named `sample.rows`: that
+# kernel name is dataset_checks' dataflow reservoir sampler in this same shared
+# registry, and a flow kernel name is global. The two share ONE algorithm
+# (cairn.core.dataflow.fidelity) rather than one name.
+"sample.fidelity" = "operator_training.flow_stages:sample_fidelity"
+"train.qlora"     = "operator_training.flow_stages:train_qlora"
+"eval.checkpoints" = "operator_training.flow_stages:eval_checkpoints"
+"package.adapter" = "operator_training.flow_stages:package_adapter"
+"train.dpo"       = "operator_training.flow_stages:train_dpo"
+"dataset.dpo_pairs" = "operator_training.flow_stages:dataset_dpo_pairs"
+# #2643 — compress/distill through the ml-flow door (GPU target), not a task leg.
+"train.distill"   = "operator_training.flow_stages:train_distill"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/operator_training"]
+exclude = ["CLAUDE.md", "AGENTS.md"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pack.toml" = "operator_training/pack.toml"
+
+# Process files (agent instructions) and tests stay out of the source archive.
+[tool.hatch.build.targets.sdist]
+exclude = ["CLAUDE.md", "AGENTS.md", "/.claude", "/tests"]

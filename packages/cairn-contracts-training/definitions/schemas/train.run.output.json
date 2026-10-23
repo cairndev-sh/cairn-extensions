@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://train.run.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "status": {
+      "default": "succeeded",
+      "enum": [
+        "succeeded",
+        "failed",
+        "running"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "backend": {
+      "default": "",
+      "title": "Backend",
+      "type": "string"
+    },
+    "local_adapter_dir": {
+      "default": "",
+      "title": "Local Adapter Dir",
+      "type": "string"
+    },
+    "adapter_uri": {
+      "default": "",
+      "description": "Location of the produced adapter (safetensors).",
+      "title": "Adapter Uri",
+      "type": "string"
+    },
+    "run_url": {
+      "default": "",
+      "description": "Tracking/job URL, if any.",
+      "title": "Run Url",
+      "type": "string"
+    },
+    "job_id": {
+      "default": "",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "metrics": {
+      "additionalProperties": true,
+      "title": "Metrics",
+      "type": "object"
+    },
+    "error": {
+      "default": "",
+      "title": "Error",
+      "type": "string"
+    }
+  }
+}

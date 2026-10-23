@@ -6,6 +6,9 @@
 members = ["packages/*", "packs/*"]
 
 [tool.uv.sources]
+cairn-contracts-training = { workspace = true, editable = false }
+cairn-contracts-training-stages = { workspace = true, editable = false }
+cairn-operator-training = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

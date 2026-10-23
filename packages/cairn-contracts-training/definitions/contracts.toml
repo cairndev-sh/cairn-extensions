@@ -1,0 +1,53 @@
+format = "cairn.contracts/1"
+
+[distribution]
+name = "cairn-contracts-training"
+version = "1.0.0"
+
+[[definitions]]
+id = "train.run"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/train.run.json"
+
+[[definitions]]
+id = "train.run.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.run.input.json"
+
+[[definitions]]
+id = "train.run.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.run.configuration.json"
+
+[[definitions]]
+id = "train.run.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.run.output.json"
+
+[[definitions]]
+id = "train.teardown"
+revision = "1.0.0"
+kind = "capability"
+path = "capabilities/train.teardown.json"
+
+[[definitions]]
+id = "train.teardown.input"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.teardown.input.json"
+
+[[definitions]]
+id = "train.teardown.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.teardown.configuration.json"
+
+[[definitions]]
+id = "train.teardown.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/train.teardown.output.json"
