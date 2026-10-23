@@ -45,9 +45,10 @@ loss is not below its baseline, so `improved` stops it.
 ## Run it
 
 ```bash
-pip install cairn-pack-finetune                       # the control plane: no torch
-pip install 'cairn-operator-training[gpu]'            # on the GPU box
+pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # the control plane: no torch
+pip install 'cairn-operator-training[gpu]'            # on the GPU box (add ,track-mlflow for MLflow)
 export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"        # in the engine's environment
+export SSH_PRIVATE_KEY="$GPU_SSH_KEY"                # cancel and the checkpoint pull-back read this one
 cairn connect add ssh --name gpu --set host=<box> --set user=<user> --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
 export CAIRN_PROFILE=<site-packages>/cairn_pack_finetune/profiles/finetune-ssh.toml
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch   # once
@@ -55,28 +56,39 @@ cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
 cairn remote advance <pipeline-id> approve-run        # then, after the run: promote-model
 ```
 
-Buckets and trackers are the environment's, never the pack's:
+Buckets and trackers are the environment's, never the pack's. The profile's header lists every
+setting; in short:
 - **Over SSH, two machines need a store both can reach.** `finetune-ssh` selects the s3 artifact
-  store (`CAIRN_ARTIFACT_S3_BUCKET`), and the IFC preset publishes the adapter with
-  `artifact_target: s3` (`CAIRN_CHECKPOINT_BUCKET`, which also mirrors checkpoints).
-- **MLflow:** `MLFLOW_TRACKING_URI` with `-i report_to='[mlflow]'` records the run.
-- **On one machine** (the default profile, the local store), none of these is needed.
+  store (`CAIRN_ARTIFACT_S3_BUCKET`, on the control plane), and the IFC preset publishes the
+  adapter with `artifact_target: s3` (`CAIRN_CHECKPOINT_BUCKET`, which also mirrors checkpoints).
+  The trainer reads `CAIRN_CHECKPOINT_BUCKET`, `CAIRN_CHECKPOINT_PREFIX` and `AWS_DEFAULT_REGION`
+  on the box: set them there, or forward them from the control plane with `remote_env`
+  (cairndev 0.2.2 and later).
+- **The box** runs the trainer in its own virtualenv (no published image carries this trainer
+  yet), installs the same `cairn-contracts-training*` versions as the control plane, and has
+  `cairn-dataflow-run` on its SSH `PATH` (or set `CAIRN_DATAFLOW_REMOTE_CMD`).
+- **MLflow:** `MLFLOW_TRACKING_URI` with `-i report_to='[mlflow]'` records the run; the box
+  installs `cairn-operator-training[gpu,track-mlflow]`.
+- **On one machine** (the default profile), the ssh settings are not needed; dataset-prep still
+  registers its versions through the s3 store.
 
-**Give each new run its own `output_name`.** It is the adapter's directory on the box, and a run
-that finds checkpoints there resumes from them. The smoke run uses `smoke_output_name`.
+The trainer writes under the leg's workdir on the box (`train-output/<output_name>`), so two runs
+never share checkpoints; a retry of the same run resumes from its own checkpoints in
+`CAIRN_CHECKPOINT_BUCKET`. The published adapter is the adapter files, without the checkpoints.
 
 ## Presets and profiles
 
 | | |
 |---|---|
 | `presets/ifc-bim-qwen3-4b.yaml` | `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest` |
-| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`), the s3 artifact store |
+| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`, venv mode), the s3 artifact store |
 
 ## Support
 
 | Path | Status | Evidence | Proven on `cairndev` |
 |---|---|---|---|
 | `sft` flow and gates on the stub trainer | EXPERIMENTAL | `tests/test_sft.py`: the pack's flow on the core runner with resolved, pinned versions; the pipeline's own predicates through the core's evaluator | 0.2.1 pre-release (local) |
+| `finetune-ssh` profile selection | EXPERIMENTAL | `tests/test_finetune_ssh_profile.py`: the core resolves the ml leg to the SSH engine on `gpu` (venv mode), the data leg to the local engine, the s3 store; no connection is made | 0.2.1 (local) |
 | `sft` on an ssh GPU box with QLoRA | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

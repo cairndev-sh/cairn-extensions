@@ -46,7 +46,7 @@ inputs:
   base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
   accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
   method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}
-  output_name: {type: str, default: "sft-candidate", description: "The adapter's name, and its directory on the box: a run that finds that directory's checkpoints resumes from them, so give each new run its own."}
+  output_name: {type: str, default: "sft-candidate", description: "The adapter's name, and its directory under the leg's workdir on the box (train-output/<output_name>). A retry of the same run resumes from its own checkpoints in CAIRN_CHECKPOINT_BUCKET; another run never does."}
   smoke_output_name: {type: str, default: "sft-smoke", description: "The smoke run's adapter name (its own directory)."}
   tag: {type: str, default: "sft-adapter@candidate", description: "The governed tag promote points at the adapter."}
   epochs: {type: float, default: 1.0}
@@ -124,8 +124,9 @@ steps:
       stub: $input.stub
       fidelity_rows: $input.smoke_rows
       max_steps: $input.smoke_steps
-      # Its own adapter directory on the box: the full run must never resume from the smoke
-      # run's checkpoints (it would skip the baseline and carry the smoke steps).
+      # Its own adapter name: the full run must never resume from the smoke run's checkpoints
+      # (it would skip the baseline and carry the smoke steps). Each leg is its own run with its
+      # own workdir and checkpoint key, so the name keeps the two adapters apart on the record.
       output_name: $input.smoke_output_name
 
   - gate: smoke-ok

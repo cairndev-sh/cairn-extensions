@@ -119,6 +119,17 @@ async def test_the_full_run_reports_the_baseline_and_a_stub_cannot_pass_improved
     assert not eval_gate_predicate(_gate("improved"), bundle_input=_INPUTS, steps={"train": out})
 
 
+async def test_every_trainer_figure_the_promote_model_card_shows_is_in_the_findings(tmp_path, versions):
+    """The person gate shows `train.train_qlora_*` findings: each must be a figure `train.qlora`
+    reports (`train_qlora_steps` was empty on the GPU path; the trainer's own tests pin that path)."""
+    result = await asyncio.to_thread(_run, tmp_path / "train", await _leg_config(versions, "train", _INPUTS))
+    findings = _findings(result)["findings"]
+    gate = next(s for s in _pipeline()["steps"] if s.get("gate") == "promote-model")
+    shown = [f.split(".", 1)[1] for f in gate["show"] if f.startswith("train.train_qlora_")]
+    assert "train_qlora_steps" in shown
+    assert {k: findings.get(k) for k in shown if findings.get(k) is None} == {}
+
+
 def test_improved_passes_only_when_the_candidate_beats_the_base_model():
     from cairn.core.engine.bundle import eval_gate_predicate
 

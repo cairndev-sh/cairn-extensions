@@ -1,26 +1,47 @@
-# profiles/finetune-ssh.toml — run the `sft` pipeline's ml legs on an ssh GPU box
-# (cairn-extensions#7).
+# profiles/finetune-ssh.toml — run the `sft` pipeline's ml legs on an ssh GPU box, with the
+# control plane on another machine (cairn-extensions#7). Not yet proven end to end: the
+# qualification run is cairn-extensions#9.
 #
+# The control plane (runs the engine, the data leg and the gates; no torch):
+#
+#     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
 #     export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"     # in the engine's environment
+#     export SSH_PRIVATE_KEY="$GPU_SSH_KEY"             # cancel and the checkpoint pull-back read this one
 #     cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
 #         --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
+#     export CAIRN_ARTIFACT_S3_BUCKET=<bucket>          # the registered versions (CAIRN_ARTIFACT_S3_PREFIX optional)
 #     export CAIRN_PROFILE=<this file>
 #
-# The box installs `cairn-operator-training[gpu]` (torch, unsloth, trl, peft, transformers,
-# bitsandbytes, pinned); the control plane installs `cairn-pack-finetune` only.
+# The GPU box (runs `cairn-dataflow-run` and the trainer only; no engine, no worker):
+#
+#     pip install 'cairn-operator-training[gpu]'        # + ',track-mlflow' with report_to: [mlflow]
+#     # and the same cairn-contracts-training* versions as the control plane (the engine checks
+#     # the flow's stages against the control plane's registry; the box must run the same ones)
+#
+#   * Venv mode only: there is no published trainer image with this pack's trainer yet, so this
+#     profile pins `remote_exec_mode = "venv"` (the box's own virtualenv, not a container).
+#   * `cairn-dataflow-run` must be on the box's non-interactive SSH PATH; otherwise set
+#     CAIRN_DATAFLOW_REMOTE_CMD on the control plane to its full path (e.g. <venv>/bin/cairn-dataflow-run).
+#   * The trainer reads CAIRN_CHECKPOINT_BUCKET (checkpoints and the `artifact_target: s3`
+#     adapter), CAIRN_CHECKPOINT_PREFIX and AWS_DEFAULT_REGION where it runs. Either way works:
+#     set them on the GPU box, or, from cairndev 0.2.2 on, have the SSH engine forward them from
+#     the control plane by name, with `remote_env` in [profile.backends] (or CAIRN_REMOTE_ENV):
+#         remote_env = "CAIRN_CHECKPOINT_BUCKET,CAIRN_CHECKPOINT_PREFIX,AWS_DEFAULT_REGION"
+#     Names containing KEY, SECRET, TOKEN or PASSWORD are never forwarded, so AWS credentials
+#     stay on the box (an instance role). MLFLOW_TRACKING_URI, set on the control plane, is
+#     forwarded and turns on `report_to: [mlflow]`; the box must reach that URI.
 #
 # Two machines need a store both can reach, so this profile selects the s3 artifact store: the
-# versions dataset-prep registers, and the adapter (`artifact_target: s3`), cross through it.
-# The environment names the buckets — CAIRN_ARTIFACT_S3_BUCKET (registered files) and
-# CAIRN_CHECKPOINT_BUCKET (checkpoints and the adapter) — and MLFLOW_TRACKING_URI turns on
-# `report_to: [mlflow]`. Running everything on one machine needs none of this: use the default
-# profile, and the local store.
+# versions dataset-prep registers (it refuses to register from the local store) and the adapter
+# (`artifact_target: s3`) cross through it. Running everything on one machine needs none of the
+# ssh settings: use the default profile, with the s3 store for dataset-prep's versions.
 
 [profile]
 visibility = "public"
 
 [profile.backends]
-dataflow_engine = "builtin"   # dataset-prep/prepare's data leg, on the control plane's box
-ml_engine       = "builtin"   # the sft-train flow, dispatched to ml_target
-ml_target       = "gpu"       # the compute.ssh connection named `gpu`
-artifact_store  = "s3"        # the versions and registered files cross machines through S3
+dataflow_engine  = "builtin"  # dataset-prep/prepare's data leg, on the control plane's box
+ml_engine        = "builtin"  # the sft-train flow, dispatched to ml_target
+ml_target        = "gpu"      # the compute.ssh connection named `gpu`
+remote_exec_mode = "venv"     # the box's virtualenv: no published image carries this trainer yet
+artifact_store   = "s3"       # the versions and registered files cross machines through S3
