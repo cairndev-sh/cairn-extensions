@@ -262,8 +262,8 @@ no connection. Object storage uses the ambient AWS credential chain; with none, 
 `dataset/split`'s `register_as` **fails closed**.
 
 **Accounts and workspaces (cairn 0.2.0, sign-in on).** No operator here declares `secrets:`. A
-team account's declared secrets reach `ctx.secrets` only and are never written to the process
-environment, so the ambient AWS credential chain this pack uses for `s3://` is the control-plane
+team account's declared secrets reach `ctx.secrets`; its run does not receive its account's
+credentials in the process environment, so the ambient AWS credential chain this pack uses for `s3://` is the control-plane
 process's or the box's: the deployment's own credentials, or none, for every account. Follow-up:
 declare the object-store credentials as `secrets:` so a team account's run uses its own. Dataset
 registry reads and writes (`dataset/split`'s `register_as` / `parent_ref`) are scoped to the

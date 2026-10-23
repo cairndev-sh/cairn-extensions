@@ -32,7 +32,7 @@ live beside them; none is on `main` yet.
 
 ## Install
 
-Every package requires `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`). None is on PyPI yet; until
+The operator packs require `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`). No package is on PyPI yet; until
 they are, install from a checkout, into the environment `cairndev` runs in, each operator pack
 together with the contract wheels it pins:
 
@@ -52,12 +52,14 @@ Each package README lists its extras.
 With sign-in on, cairn scopes connections and secrets to the account that owns the run's
 workspace. Two consequences for these packages:
 
-- **Engine targets.** A profile-bound `ml_target` (or `dataflow_target`) names a connection of
-  the deployment. A team account's leg does not use the deployment's connections, so it needs a
-  connection of that name in its own account, or the leg fails.
+- **Engine targets.** A connection bound in the deployment's profile (`ml_target`,
+  `dataflow_target`) belongs to the deployment, and a team account's flow legs cannot use it.
+  Connection names are unique across a deployment, so a team account creates a target connection
+  under its own name (the console suggests `<account>-<provider>`) and names it in its pipelines
+  or flows.
 - **Credentials.** A team account's run receives the secrets an operator declares (`secrets:`)
-  from its own connections, in `ctx.secrets` only; nothing is written to the process
-  environment. These packages do not declare `secrets:` yet: credentials they read from the
+  from its own connections, in `ctx.secrets`; it does not receive its account's credentials in the
+  process environment. These packages do not declare `secrets:` yet: credentials they read from the
   environment (`HF_TOKEN`, `WANDB_*`, `AWS_*`) are whatever the process or the box holds, for
   every account. See each package's `DESIGN.md`.
 

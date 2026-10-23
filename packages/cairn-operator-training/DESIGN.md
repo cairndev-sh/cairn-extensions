@@ -160,10 +160,11 @@ here stay legacy until their pipelines' slices. Proof: `tests/core/test_retrain_
 **Accounts (cairn 0.2.0, sign-in on).** cairn resolves a run's connections and declared secrets in
 the account that owns the run's workspace. Two consequences for this wheel:
 
-- A profile-bound `ml_target` names a deployment connection. A team account's leg does not see
-  it, so the account needs a `compute.ssh` connection of the same name, or the leg fails.
-- This wheel declares no `secrets:`. A team account's declared secrets reach `ctx.secrets` only
-  and are never written to the process environment, so `HF_TOKEN`, `WANDB_*` and `AWS_*` read from
+- A connection bound as the profile's `ml_target` belongs to the deployment, and a team account's
+  flow legs cannot use it. The account creates its own `compute.ssh` connection under its own name
+  (names are unique across a deployment) and names it as the target in its pipelines or flows.
+- This wheel declares no `secrets:`. A team account's declared secrets reach `ctx.secrets`; its
+  run does not receive its account's credentials in the process environment, so `HF_TOKEN`, `WANDB_*` and `AWS_*` read from
   the environment are whatever the control-plane process or the box holds: the deployment's own
   values, or none, for every account. Follow-up: declare them as `secrets:` and read them from
   `ctx.secrets`, so a team account's run uses that account's credentials.
