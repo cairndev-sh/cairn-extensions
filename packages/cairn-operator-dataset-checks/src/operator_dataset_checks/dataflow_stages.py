@@ -504,7 +504,14 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
     become one artifact descriptor per split in the runner. ``config.register`` names the
     dataset versions ``<register>-train`` / ``-val`` / ``-test`` with roles training /
     validation / test — the names and roles ``dataset/split`` registers — so the holdout door
-    finds the test version the trainer must not meet."""
+    finds the test version the trainer must not meet.
+
+    ``register`` needs the s3 store. A local split is a file in this leg's workdir, which the
+    engine makes as a temporary directory: a reboot or a tmp cleanup deletes it, and a control
+    plane on another machine cannot read it. The registry is the core's, and the core makes a
+    registered file durable only by copying it to the object store (``artifact_store = s3``),
+    so a version registered from a local split names bytes that disappear. It is refused before
+    the split runs."""
     from operator_dataset_checks.operators.split import run_split  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks.schemas.split import SplitInput  # noqa: PLC0415
 
@@ -514,6 +521,16 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
         raise ValueError("split: `register` needs `export: true` (only exported splits are registered)")
     if export and int(config.get("shard_size", 0)):
         raise ValueError("split: `export` needs shard_size 0 (one file per split is one product)")
+    store = _export_store(config)
+    if register and store != "s3":
+        raise ValueError(
+            f"split: `register` needs `store: s3`, and the store here is {store!r}. A local split "
+            f"stays in this leg's temporary working directory ({workdir}), which a reboot or a tmp "
+            "cleanup deletes and a control plane on another machine cannot read, so the registered "
+            "versions would name files that disappear. Set `store: s3`, or `artifact_store = \"s3\"` "
+            "in the profile, with CAIRN_ARTIFACT_S3_BUCKET (and CAIRN_ARTIFACT_S3_ENDPOINT for MinIO "
+            "or another S3-compatible store); or drop `register` to keep the splits as local files "
+            "without registering them.")
     out_dir = workdir / "splits"
     result = run_split(SplitInput(
         path=str(_current(workdir)), output_dir=str(out_dir),
@@ -545,7 +562,7 @@ def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> 
     """The ``outputs`` stats of an exported split: per non-empty split its file (local, or
     uploaded with ``store: s3``), hash, size, rows and, with ``register``, the version name and
     role. An empty split is no product: registering a 0-row version would only be refused."""
-    store = str(config.get("store") or _artifact_store_backend()).lower()
+    store = _export_store(config)
     out: dict = {"outputs": []}
     for name, path in paths.items():
         digest, size, rows = _sha256_lines(Path(path))
@@ -561,6 +578,11 @@ def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> 
             out[f"outputs.{name}.register_as"] = f"{register}-{name}"
             out[f"outputs.{name}.register_role"] = _SPLIT_ROLES[name]
     return out
+
+
+def _export_store(config: dict) -> str:
+    """``config.store``, else the environment's ``artifact_store`` backend: ``local`` or ``s3``."""
+    return str(config.get("store") or _artifact_store_backend()).lower()
 
 
 def scan_all(workdir: Path, config: dict, inputs: list[str]) -> dict:
