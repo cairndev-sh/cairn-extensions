@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`split` returns train / val / test as products** (cairn-extensions#6). With `export: true`
+  each non-empty split is a product of the stage; with `register: <name>` it registers as
+  `<name>-train` / `-val` / `-test` with roles training / validation / test. `register` needs
+  the s3 store (`store: s3`, or the environment's `artifact_store = "s3"`): a local split is a
+  file in the leg's temporary workdir, and a version registered from it would name bytes that a
+  reboot deletes and another machine cannot read, so the stage refuses it before splitting.
+
 - **A pinned Hub revision and the bundled manifest** (cairn-extensions#5).
   `ingest.normalize` takes `revision` (stage contract 1.2.0: configuration 1.1.0, output 1.2.0)
   and records `revision` (Hub ids only), `revision_sha`, `fetched_at` and `snapshot_hash`, also
