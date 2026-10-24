@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Prompt+response length, derived fields and field counts** (cairn-extensions#16).
+  `profile.tokens` implements 1.1.0: `measure: example` counts prompt + response and reports
+  each side's p50/p95/max (`measure: response`, the default, is unchanged). New stage
+  `fields.derive` adds a field from a regular expression over another (`extract` or
+  `normalize`) and never overwrites one. New read-only stage `profile.fields` reports label
+  values and counts as flat lists and grouping fields by size only. Requires
+  `cairn-contracts-dataset-stages==1.4.0`.
+
 - **`split` returns train / val / test as products** (cairn-extensions#6). With `export: true`
   each non-empty split is a product of the stage; with `register: <name>` it registers as
   `<name>-train` / `-val` / `-test` with roles training / validation / test. `register` needs

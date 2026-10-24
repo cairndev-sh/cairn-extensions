@@ -5,7 +5,7 @@
 # still reads. The root installs it NON-editable (`{ workspace = true, editable = false }`).
 [project]
 name = "cairn-contracts-dataset-stages"
-version = "1.3.0"
+version = "1.4.0"
 description = "Shared stage contracts for the dataset readiness kernels (dataset.stage.*, cairn.stage/1, ADR-0118)."
 readme = "README.md"
 requires-python = ">=3.12"
