@@ -19,6 +19,14 @@
   `split` now implements `dataset.stage.split/1.0.0`, whose configuration is closed: a flow that
   passes `split` a key the contract does not name is refused by the stage-contract check.
 
+- **`export.jsonl` with `register` needs the s3 store too** (cairn-extensions#6; owner decision
+  2026-10-24: registering a dataset version needs an S3-compatible store, and local development
+  uses MinIO or similar). On the local store the export was registered as a file in the leg's
+  temporary workdir; it is now refused, before anything is written, with the same message as
+  `split` (one helper). Set `store: s3`, or `artifact_store = "s3"` with
+  `CAIRN_ARTIFACT_S3_BUCKET` (`CAIRN_ARTIFACT_S3_ENDPOINT` for MinIO). An export without
+  `register` is unchanged on either store.
+
 - **A pinned Hub revision and the bundled manifest** (cairn-extensions#5).
   `ingest.normalize` takes `revision` (stage contract 1.2.0: configuration 1.1.0, output 1.2.0)
   and records `revision` (Hub ids only), `revision_sha`, `fetched_at` and `snapshot_hash`, also

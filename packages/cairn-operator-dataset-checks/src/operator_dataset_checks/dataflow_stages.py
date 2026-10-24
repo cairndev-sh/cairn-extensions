@@ -522,16 +522,8 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
         raise ValueError("split: `register` needs `export: true` (only exported splits are registered)")
     if export and int(config.get("shard_size", 0)):
         raise ValueError("split: `export` needs shard_size 0 (one file per split is one product)")
-    store = _export_store(config)
-    if register and store != "s3":
-        raise ValueError(
-            f"split: `register` needs `store: s3`, and the store here is {store!r}. A local split "
-            f"stays in this leg's temporary working directory ({workdir}), which a reboot or a tmp "
-            "cleanup deletes and a control plane on another machine cannot read, so the registered "
-            "versions would name files that disappear. Set `store: s3`, or `artifact_store = \"s3\"` "
-            "in the profile, with CAIRN_ARTIFACT_S3_BUCKET (and CAIRN_ARTIFACT_S3_ENDPOINT for MinIO "
-            "or another S3-compatible store); or drop `register` to keep the splits as local files "
-            "without registering them.")
+    if register:
+        _refuse_local_register("split", "split", config, workdir)
     out_dir = workdir / "splits"
     result = run_split(SplitInput(
         path=str(_current(workdir)), output_dir=str(out_dir),
@@ -584,6 +576,25 @@ def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> 
 def _export_store(config: dict) -> str:
     """``config.store``, else the environment's ``artifact_store`` backend: ``local`` or ``s3``."""
     return str(config.get("store") or _artifact_store_backend()).lower()
+
+
+def _refuse_local_register(stage: str, noun: str, config: dict, workdir: Path) -> None:
+    """A stage asked to ``register`` a dataset version needs the s3 store: a local file is in
+    the leg's temporary workdir, which a reboot or a tmp cleanup deletes and a control plane on
+    another machine cannot read, so the version would name bytes that disappear. Raised before
+    the stage writes anything (owner decision 2026-10-24: registering needs an S3-compatible
+    store; local development uses MinIO or similar)."""
+    store = _export_store(config)
+    if store == "s3":
+        return
+    raise ValueError(
+        f"{stage}: `register` needs `store: s3`, and the store here is {store!r}. A local {noun} "
+        f"stays in this leg's temporary working directory ({workdir}), which a reboot or a tmp "
+        "cleanup deletes and a control plane on another machine cannot read, so the registered "
+        "versions would name files that disappear. Set `store: s3`, or `artifact_store = \"s3\"` "
+        "in the profile, with CAIRN_ARTIFACT_S3_BUCKET (and CAIRN_ARTIFACT_S3_ENDPOINT for MinIO "
+        f"or another S3-compatible store); or drop `register` to keep the {noun} local and "
+        "unregistered.")
 
 
 def scan_all(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -810,8 +821,15 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     <workdir-id>/<name>``, ``output`` = the ``s3://`` URI). Unset → the
     environment's ``artifact_store`` backend (profile → CAIRN_ARTIFACT_STORE →
     local). Always returns ``content_hash`` + ``bytes`` so the engine registers
-    a REAL descriptor, not a placeholder."""
+    a REAL descriptor, not a placeholder.
+
+    ``register`` needs the s3 store, as ``split``'s does: a version registered from a local
+    export would name a file in the leg's temporary workdir. Refused before anything is
+    written."""
     name = str(config.get("name", "output.jsonl"))
+    register_as = str(config.get("register") or "").strip()
+    if register_as:
+        _refuse_local_register("export.jsonl", "export", config, workdir)
     src = _current(workdir)
     # #2396 (ADR-0102 D1) — `rows` is the `rows_out` the intake verdict reads (0 → invalid_format),
     # counted in the same pass as the hash.
@@ -820,8 +838,7 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     # export as a new dataset version once the leg lands (the box has no DB
     # access, D4) — the kernel only echoes the request into its stats, which
     # ride the descriptor to leg_executor's registration block.
-    register_as = str(config.get("register") or "").strip()
-    store = str(config.get("store") or _artifact_store_backend()).lower()
+    store = _export_store(config)
     if store == "s3":
         uri = _s3_upload(src, _s3_export_uri(workdir, name, root=config.get("root")))
         out = {"output": uri, "format": "jsonl", "store": "s3",
@@ -831,11 +848,9 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
         return out
     dest = workdir / name
     shutil.copyfile(src, dest)
-    out = {"output": str(dest), "format": "jsonl", "store": "local",
-           "content_hash": digest, "bytes": size, "rows": rows}
-    if register_as:  # was s3-branch-only — a local export silently never registered
-        out["register_as"] = register_as
-    return out
+    # a local export carries no `register_as`: a register request on this store was refused above
+    return {"output": str(dest), "format": "jsonl", "store": "local",
+            "content_hash": digest, "bytes": size, "rows": rows}
 
 
 def _artifact_store_backend() -> str:

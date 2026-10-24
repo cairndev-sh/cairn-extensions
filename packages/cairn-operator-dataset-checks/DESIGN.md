@@ -79,8 +79,10 @@ intake. The chain is `ingest.normalize -> dedup.exact -> dedup.near -> decontam.
 pii.redact -> expectations.check -> profile.tokens -> export.jsonl`, and the leg that
 registers the export folds every stage's flat stats into ONE intake verdict
 (`admitted | degraded | blocked | invalid_format`) with a structured report on the
-version, which the launch door reads (`cairn/core/intake.py`). Three consequences the
-kernels here have to honour:
+version, which the launch door reads (`cairn/core/intake.py`). The registered export lives in
+the s3 store: `export.jsonl` (like `split`) refuses `register` on the local store, whose file
+would sit in the leg's temporary workdir (cairn-extensions#6; local development uses MinIO or
+another S3-compatible store). Three consequences the kernels here have to honour:
 
 * **A default-chain kernel degrades; an opted-in one refuses.** `dedup.near` is an honest
   skip (`checked: false` + a note, corpus untouched) without the `[minhash]` extra,
