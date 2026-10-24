@@ -2,7 +2,7 @@ format = "cairn.contracts/1"
 
 [distribution]
 name = "cairn-contracts-dataset-stages"
-version = "1.2.0"
+version = "1.4.0"
 
 [[definitions]]
 id = "dataset.stage.decontam_apply"
@@ -234,3 +234,79 @@ id = "dataset.manifest.document"
 revision = "1.0.0"
 kind = "schema"
 path = "schemas/dataset.manifest.document.json"
+
+# cairn-extensions#6 — the split kernel under a stage contract, able to return its splits as
+# products (export) and register them with their roles (register).
+[[definitions]]
+id = "dataset.stage.split"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/dataset.stage.split.json"
+
+[[definitions]]
+id = "dataset.stage.split.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.split.configuration.json"
+
+[[definitions]]
+id = "dataset.stage.split.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.split.output.json"
+
+# cairn-extensions#16 — profile.tokens measures prompt + response (1.1.0); fields.derive and
+# profile.fields give topic labels, template families and their counts.
+[[definitions]]
+id = "dataset.stage.profile_tokens"
+revision = "1.1.0"
+kind = "stage"
+path = "stages/dataset.stage.profile_tokens.1.1.0.json"
+
+[[definitions]]
+id = "dataset.stage.profile_tokens.configuration"
+revision = "1.1.0"
+kind = "schema"
+path = "schemas/dataset.stage.profile_tokens.configuration.1.1.0.json"
+
+[[definitions]]
+id = "dataset.stage.profile_tokens.output"
+revision = "1.1.0"
+kind = "schema"
+path = "schemas/dataset.stage.profile_tokens.output.1.1.0.json"
+
+[[definitions]]
+id = "dataset.stage.fields_derive"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/dataset.stage.fields_derive.json"
+
+[[definitions]]
+id = "dataset.stage.fields_derive.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.fields_derive.configuration.json"
+
+[[definitions]]
+id = "dataset.stage.fields_derive.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.fields_derive.output.json"
+
+[[definitions]]
+id = "dataset.stage.profile_fields"
+revision = "1.0.0"
+kind = "stage"
+path = "stages/dataset.stage.profile_fields.json"
+
+[[definitions]]
+id = "dataset.stage.profile_fields.configuration"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.profile_fields.configuration.json"
+
+[[definitions]]
+id = "dataset.stage.profile_fields.output"
+revision = "1.0.0"
+kind = "schema"
+path = "schemas/dataset.stage.profile_fields.output.json"

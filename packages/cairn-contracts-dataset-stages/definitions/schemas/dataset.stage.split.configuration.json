@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.split.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "seed": {
+      "type": "integer",
+      "default": 13,
+      "description": "Seed of the deterministic assignment; the same dataset and seed give the same split."
+    },
+    "train_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Share of rows (or groups) for train (default 0.9)."
+    },
+    "val_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Share for val (default 0.1)."
+    },
+    "test_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Share for test; 0 (default) writes no test split."
+    },
+    "group_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Row field whose value never spans two splits."
+    },
+    "stratify_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Row field whose distribution is balanced across splits."
+    },
+    "backend": {
+      "enum": [
+        "auto",
+        "hash",
+        "sklearn"
+      ],
+      "default": "auto"
+    },
+    "shard_size": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Rows per output shard; 0 writes one file per split. An export needs 0."
+    },
+    "export": {
+      "type": "boolean",
+      "default": false,
+      "description": "Return each split as a product of the stage (cairn-extensions#6): its file, hash and row count."
+    },
+    "register": {
+      "type": "string",
+      "description": "With export: register the splits as dataset versions <register>-train (role training), -val (validation) and -test (test)."
+    },
+    "store": {
+      "type": "string",
+      "description": "With export: local or s3; unset = the environment's artifact store."
+    },
+    "root": {
+      "type": "string",
+      "description": "s3 key root override."
+    }
+  },
+  "additionalProperties": false
+}

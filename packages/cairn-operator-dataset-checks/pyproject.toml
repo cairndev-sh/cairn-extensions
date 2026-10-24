@@ -23,9 +23,9 @@ dependencies = [
     "boto3>=1.34",
     # The engine range this pack is proven on (ADR-0128 D3: bounded, the same range as
     # `[compat]`) and the two contract wheels it implements, pinned exactly.
-    "cairndev>=0.2.0,<0.3",
+    "cairndev>=0.2.1,<0.3",
     "cairn-contracts-dataset==1.2.0",
-    "cairn-contracts-dataset-stages==1.2.0",
+    "cairn-contracts-dataset-stages==1.4.0",
 ]
 
 [project.urls]
@@ -145,6 +145,10 @@ split = ["scikit-learn>=1.0"]
 "filter.rows" = "operator_dataset_checks.dataflow_stages:filter_rows"
 # cairn-extensions#5 — the bundled manifest of the working dataset.
 "dataset.manifest" = "operator_dataset_checks.dataflow_stages:dataset_manifest"
+# cairn-extensions#16 — topic labels and template families for a dataset with neither, and
+# their distribution as counts.
+"fields.derive" = "operator_dataset_checks.dataflow_stages:fields_derive"
+"profile.fields" = "operator_dataset_checks.dataflow_stages:profile_fields"
 
 # #2022 — the Add-dataset preview reads a bounded sample of any source this
 # pack can read (JSON/JSONL/CSV/Parquet, Hub ids, s3). Core resolves the reader

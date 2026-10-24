@@ -65,6 +65,24 @@ def _response_text(row: dict) -> str:
     return ""
 
 
+def _prompt_text(row: dict) -> str:
+    """What the model is given for this example — everything but the answer
+    :func:`_response_text` picks (cairn-extensions#16): the turns before the last
+    assistant reply, an Alpaca ``instruction`` + ``input``, or a ``prompt``. Empty for a
+    plain ``text`` row, which has no prompt side."""
+    for key, role_key, text_key in (("messages", "role", "content"), ("conversations", "from", "value")):
+        if isinstance(row.get(key), list):
+            turns = row[key]
+            last = max((i for i, t in enumerate(turns)
+                        if str(t.get(role_key, "")).lower() in _ASSISTANT_ROLES), default=len(turns))
+            return "\n".join(str(t.get(text_key, "")) for t in turns[:last])
+    if "output" in row:
+        return "\n".join(str(row[k]) for k in ("instruction", "input") if row.get(k))
+    if "completion" in row:
+        return str(row.get("prompt", ""))
+    return ""
+
+
 def _stats(values: list[int]) -> LengthStats:
     if not values:
         return LengthStats(min=0, max=0, mean=0.0, p50=0)

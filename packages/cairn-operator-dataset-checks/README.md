@@ -13,10 +13,13 @@ share one row vocabulary:
 - **Dataflow stages** (`cairn.dataflow_stages`): `ingest.normalize`, `dedup.exact`,
   `dedup.near`, `decontam.apply`, `decontam.scan`, `pii.redact`, `profile.tokens`, `split`,
   `scan.all`, `sample.rows`, `curate.score`, `filter.rows`, `export.jsonl`, `export.parquet`,
-  `dataset.manifest` — the admission and cleaning chain an engine runs. `ingest.normalize`
+  `dataset.manifest`, `fields.derive`, `profile.fields` — the admission and cleaning chain an
+  engine runs. `ingest.normalize`
   takes `revision` to load a Hub dataset at a commit, tag or branch; `dataset.manifest`, after
   the export, writes `manifest.json` (source, revision and its commit, hashes, rows, field names,
-  licence, citation, fetch time; never a row).
+  licence, citation, fetch time; never a row). `profile.tokens` with `measure: example` counts
+  prompt + response; `fields.derive` adds a topic label or a template family from a regular
+  expression; `profile.fields` reports label counts, and group sizes only.
 - **Dataset reader** (`cairn.dataset_readers`): `rows`, the bounded preview reader.
 - **Contracts:** implements the `dataset.*` capability contracts (`cairn-contracts-dataset`)
   and the `dataset.stage.*` stage contracts (`cairn-contracts-dataset-stages`).
@@ -47,7 +50,7 @@ pack; a path that cannot degrade raises an error naming its extra.
 | `tokenizers` | HF `tokenizers` for subword token counts; without it, whitespace word counts, said so in the stats. |
 | `split` | scikit-learn for grouped/stratified splits; without it, the deterministic hash split. |
 
-The base install pins `cairndev>=0.2.0,<0.3` and the two contract wheels exactly. Check an
+The base install pins `cairndev>=0.2.1,<0.3` and the two contract wheels exactly. Check an
 install with `cairn doctor` and `cairn pack check`.
 
 ## Support

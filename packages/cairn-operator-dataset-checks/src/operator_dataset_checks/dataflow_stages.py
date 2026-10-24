@@ -497,10 +497,33 @@ def _pii_redact_duckdb(workdir: Path, *, kinds=None) -> dict:
 def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
     """Deterministic group-aware train/val[/test] split — the ``SplitOp`` body.
     Terminal stage: writes ``workdir/splits/<name>.jsonl`` per split (the prep
-    convention); ``current.jsonl`` is left as-is for any sibling export stage."""
+    convention); ``current.jsonl`` is left as-is for any sibling export stage.
+
+    cairn-extensions#6 — ``config.export`` returns each split as a product of the stage: its
+    ``outputs.<name>.*`` stats (file, hash, rows; uploaded beside the export with ``store: s3``)
+    become one artifact descriptor per split in the runner. ``config.register`` names the
+    dataset versions ``<register>-train`` / ``-val`` / ``-test`` with roles training /
+    validation / test — the names and roles ``dataset/split`` registers — so the holdout door
+    finds the test version the trainer must not meet.
+
+    ``register`` needs the s3 store. A local split is a file in this leg's workdir, which the
+    engine makes as a temporary directory: a reboot or a tmp cleanup deletes it, and a control
+    plane on another machine cannot read it. With ``store: s3`` this stage uploads each split
+    itself (``_s3_upload``) and the version names the ``s3://`` object; with the local store
+    the version would name bytes that disappear (the core's own relay to the object store is
+    on only when ``artifact_store = s3``, and copies only what the control plane can read). It
+    is refused before the split runs."""
     from operator_dataset_checks.operators.split import run_split  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks.schemas.split import SplitInput  # noqa: PLC0415
 
+    export = bool(config.get("export", False))
+    register = str(config.get("register") or "").strip()
+    if register and not export:
+        raise ValueError("split: `register` needs `export: true` (only exported splits are registered)")
+    if export and int(config.get("shard_size", 0)):
+        raise ValueError("split: `export` needs shard_size 0 (one file per split is one product)")
+    if register:
+        _refuse_local_register("split", "split", config, workdir)
     out_dir = workdir / "splits"
     result = run_split(SplitInput(
         path=str(_current(workdir)), output_dir=str(out_dir),
@@ -519,7 +542,59 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
         stats[f"rows_{name}"] = n
     for name, p in result.output_paths.items():
         stats[f"{name}_path"] = p
+    if export:
+        stats.update(_split_products(workdir, config, result.output_paths, register))
     return stats
+
+
+#: The role each split is registered for — the names and roles `dataset/split` uses (#2020).
+_SPLIT_ROLES = {"train": "training", "val": "validation", "test": "test"}
+
+
+def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> dict:
+    """The ``outputs`` stats of an exported split: per non-empty split its file (local, or
+    uploaded with ``store: s3``), hash, size, rows and, with ``register``, the version name and
+    role. An empty split is no product: registering a 0-row version would only be refused."""
+    store = _export_store(config)
+    out: dict = {"outputs": []}
+    for name, path in paths.items():
+        digest, size, rows = _sha256_lines(Path(path))
+        if not rows:
+            continue
+        uri = (_s3_upload(Path(path), _s3_export_uri(workdir, f"{name}.jsonl", root=config.get("root")))
+               if store == "s3" else str(path))
+        out["outputs"].append(name)
+        out.update({f"outputs.{name}.output": uri, f"outputs.{name}.content_hash": digest,
+                    f"outputs.{name}.bytes": size, f"outputs.{name}.rows": rows,
+                    f"outputs.{name}.kind": "dataset"})
+        if register:
+            out[f"outputs.{name}.register_as"] = f"{register}-{name}"
+            out[f"outputs.{name}.register_role"] = _SPLIT_ROLES[name]
+    return out
+
+
+def _export_store(config: dict) -> str:
+    """``config.store``, else the environment's ``artifact_store`` backend: ``local`` or ``s3``."""
+    return str(config.get("store") or _artifact_store_backend()).lower()
+
+
+def _refuse_local_register(stage: str, noun: str, config: dict, workdir: Path) -> None:
+    """A stage asked to ``register`` a dataset version needs the s3 store: a local file is in
+    the leg's temporary workdir, which a reboot or a tmp cleanup deletes and a control plane on
+    another machine cannot read, so the version would name bytes that disappear. Raised before
+    the stage writes anything (owner decision 2026-10-24: registering needs an S3-compatible
+    store; local development uses MinIO or similar)."""
+    store = _export_store(config)
+    if store == "s3":
+        return
+    raise ValueError(
+        f"{stage}: `register` needs `store: s3`, and the store here is {store!r}. A local {noun} "
+        f"stays in this leg's temporary working directory ({workdir}), which a reboot or a tmp "
+        "cleanup deletes and a control plane on another machine cannot read, so the registered "
+        "versions would name files that disappear. Set `store: s3`, or `artifact_store = \"s3\"` "
+        "in the profile, with CAIRN_ARTIFACT_S3_BUCKET (and CAIRN_ARTIFACT_S3_ENDPOINT for MinIO "
+        f"or another S3-compatible store); or drop `register` to keep the {noun} local and "
+        "unregistered.")
 
 
 def scan_all(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -746,8 +821,15 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     <workdir-id>/<name>``, ``output`` = the ``s3://`` URI). Unset → the
     environment's ``artifact_store`` backend (profile → CAIRN_ARTIFACT_STORE →
     local). Always returns ``content_hash`` + ``bytes`` so the engine registers
-    a REAL descriptor, not a placeholder."""
+    a REAL descriptor, not a placeholder.
+
+    ``register`` needs the s3 store, as ``split``'s does: a version registered from a local
+    export would name a file in the leg's temporary workdir. Refused before anything is
+    written."""
     name = str(config.get("name", "output.jsonl"))
+    register_as = str(config.get("register") or "").strip()
+    if register_as:
+        _refuse_local_register("export.jsonl", "export", config, workdir)
     src = _current(workdir)
     # #2396 (ADR-0102 D1) — `rows` is the `rows_out` the intake verdict reads (0 → invalid_format),
     # counted in the same pass as the hash.
@@ -756,8 +838,7 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     # export as a new dataset version once the leg lands (the box has no DB
     # access, D4) — the kernel only echoes the request into its stats, which
     # ride the descriptor to leg_executor's registration block.
-    register_as = str(config.get("register") or "").strip()
-    store = str(config.get("store") or _artifact_store_backend()).lower()
+    store = _export_store(config)
     if store == "s3":
         uri = _s3_upload(src, _s3_export_uri(workdir, name, root=config.get("root")))
         out = {"output": uri, "format": "jsonl", "store": "s3",
@@ -767,11 +848,9 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
         return out
     dest = workdir / name
     shutil.copyfile(src, dest)
-    out = {"output": str(dest), "format": "jsonl", "store": "local",
-           "content_hash": digest, "bytes": size, "rows": rows}
-    if register_as:  # was s3-branch-only — a local export silently never registered
-        out["register_as"] = register_as
-    return out
+    # a local export carries no `register_as`: a register request on this store was refused above
+    return {"output": str(dest), "format": "jsonl", "store": "local",
+            "content_hash": digest, "bytes": size, "rows": rows}
 
 
 def _artifact_store_backend() -> str:
@@ -980,17 +1059,24 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
         raise ValueError(
             f"over_length must be one of {_OVER_LENGTH_POLICIES} — got {policy!r}. "
             "Truncation is deliberately not an option (ADR-0102 D1).")
+    # cairn-extensions#16 — `example` measures prompt + response, which is what a training
+    # sequence holds (the chat template's own tokens aside); `response` (default) as before.
+    measure = str(config.get("measure", "response")).lower()
+    if measure not in ("response", "example"):
+        raise ValueError(f"measure must be 'response' or 'example' — got {measure!r}")
     backend, tokenizer, note = _resolve_tokenizer(config)
 
     from operator_dataset_checks import _tokenizer  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks._io import JsonlWriter  # noqa: PLC0415
-    from operator_dataset_checks.operators.profile import _response_text  # noqa: PLC0415 - ONE definition of "the model's answer"
+    from operator_dataset_checks.operators.profile import _prompt_text, _response_text  # noqa: PLC0415 - ONE definition of "the model's answer"
 
     src = _current(workdir)
     within = workdir / "within-length.jsonl"
     tok_path = str(config.get("tokenizer_path") or "") or None
     tok_name = (tokenizer or None) if (backend == "tokenizers" and not tok_path) else None
     lengths: list[int] = []
+    prompt_lengths: list[int] = []
+    response_lengths: list[int] = []
     over = 0
     kept = 0
     quarantined = 0
@@ -1013,6 +1099,12 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
                     continue
                 n = _tokenizer.count(_response_text(row), backend=backend,
                                      tokenizer_name=tok_name, tokenizer_path=tok_path)
+                if measure == "example":
+                    p = _tokenizer.count(_prompt_text(row), backend=backend,
+                                         tokenizer_name=tok_name, tokenizer_path=tok_path)
+                    prompt_lengths.append(p)
+                    response_lengths.append(n)
+                    n += p
                 lengths.append(n)
                 if max_seq_len and n > max_seq_len:
                     over += 1
@@ -1044,6 +1136,12 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
     }
     if note:
         stats["token_backend_note"] = note
+    stats["measure"] = measure
+    if measure == "example":
+        for side, values in (("prompt", sorted(prompt_lengths)), ("response", sorted(response_lengths))):
+            stats.update({f"{side}_tokens_p50": _percentile(values, 0.50),
+                          f"{side}_tokens_p95": _percentile(values, 0.95),
+                          f"{side}_tokens_max": values[-1] if values else 0})
     # Histogram as FLAT scalars — only scalars cross the dataflow boundary
     # (ADR-0081 D3 / ADR-0080 R5); cairn.core.intake reassembles the buckets.
     edges = list(_TOKEN_BUCKETS)
@@ -1051,6 +1149,126 @@ def profile_tokens(workdir: Path, config: dict, inputs: list[str]) -> dict:
         high = edges[i + 1] if i + 1 < len(edges) else None
         count = sum(1 for n in lengths if n >= low and (high is None or n < high))
         stats[f"bucket_{low}_{high if high is not None else 'plus'}"] = count
+    return stats
+
+
+_DERIVE_MODES = ("extract", "normalize")
+_DERIVE_CASES = ("keep", "lower", "upper")
+
+
+def _derive_rules(config: dict) -> list[dict]:
+    """Validated ``fields.derive`` rules, each with its compiled pattern."""
+    import re  # noqa: PLC0415 - stage bodies keep their imports (D5)
+
+    rules = config.get("rules") or []
+    if not isinstance(rules, list):
+        raise ValueError("fields.derive: `rules` is a list of {field, source, mode, pattern}")
+    out, fields = [], set()
+    for rule in rules:
+        field, source = str(rule.get("field") or ""), str(rule.get("source") or "")
+        mode, case = str(rule.get("mode", "extract")), str(rule.get("case", "keep"))
+        if not field or not source or not rule.get("pattern"):
+            raise ValueError(f"fields.derive: a rule needs field, source and pattern — got {rule!r}")
+        if mode not in _DERIVE_MODES or case not in _DERIVE_CASES:
+            raise ValueError(f"fields.derive: mode must be one of {_DERIVE_MODES} and case one of "
+                             f"{_DERIVE_CASES} — got {mode!r}, {case!r}")
+        if field in fields:
+            raise ValueError(f"fields.derive: two rules write {field!r}")
+        fields.add(field)
+        flags = re.IGNORECASE if rule.get("ignore_case") else 0
+        out.append({"field": field, "source": source, "mode": mode, "case": case,
+                    "rx": re.compile(str(rule["pattern"]), flags),
+                    "replace": str(rule.get("replace", "#")), "default": str(rule.get("default", "other"))})
+    return out
+
+
+def fields_derive(workdir: Path, config: dict, inputs: list[str]) -> dict:
+    """cairn-extensions#16 — add fields to every row from a regular expression over another
+    field, for a dataset that has no topic or template column of its own.
+
+    ``extract`` keeps the first match (its first group when the pattern has one) and
+    ``default`` (``other``) when nothing matches — a topic label. ``normalize`` replaces every
+    match with ``replace`` (``#``) and collapses whitespace — a template family, so rows that
+    differ only in numbers or names share one value. A rule never overwrites a field the row
+    already has: the source data stays as it was, and a trainer that formats the Alpaca or chat
+    fields never sees the added ones. Stats are counts only. No rules (a pipeline that bound
+    none) leaves the working dataset as it is."""
+    from operator_dataset_checks._io import JsonlWriter  # noqa: PLC0415 - data deps live in stage bodies (D5)
+
+    rules = _derive_rules(config)
+    src, tmp = _current(workdir), workdir / "derived.jsonl"
+    if not rules:
+        return {"rows": _sha256_lines(src)[2], "fields": []}
+    matched = {r["field"]: 0 for r in rules}
+    rows = 0
+    with JsonlWriter(tmp) as writer, src.open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            for r in rules:
+                if r["field"] in row:
+                    raise ValueError(f"fields.derive: rows already carry {r['field']!r}; "
+                                     "a derived field never overwrites data")
+                text = str(row.get(r["source"]) or "")
+                if r["mode"] == "extract":
+                    m = r["rx"].search(text)
+                    found = (m.group(1) if m.re.groups else m.group(0)) if m else None
+                    # An optional group that did not take part is no match either.
+                    value = found if found is not None else r["default"]
+                    matched[r["field"]] += found is not None
+                else:
+                    value = " ".join(r["rx"].sub(r["replace"], text).split())
+                    matched[r["field"]] += value != " ".join(text.split())
+                row[r["field"]] = value.lower() if r["case"] == "lower" else value.upper() if r["case"] == "upper" else value
+            writer.write(row)
+            rows += 1
+    shutil.move(str(tmp), src)
+    stats: dict = {"rows": rows, "fields": [r["field"] for r in rules]}
+    for field, n in matched.items():
+        stats[f"{field}_matched"] = n
+    return stats
+
+
+def profile_fields(workdir: Path, config: dict, inputs: list[str]) -> dict:
+    """cairn-extensions#16 — the distribution of row fields, as counts. READ-ONLY.
+
+    ``count`` fields (labels, e.g. a derived topic) report their ``top`` values (default 20,
+    each cut to ``value_chars``, default 64) and counts as two flat lists, the rest summed as
+    ``other``. ``groups`` fields (e.g. a template family, whose values are prompt text) report
+    sizes only — distinct groups, the largest, singletons, the median — never a value, so no
+    row content reaches the record. Neither set reports the row count only."""
+    from collections import Counter  # noqa: PLC0415 - stage bodies keep their imports (D5)
+
+    count_fields = [str(f) for f in (config.get("count") or [])]
+    group_fields = [str(f) for f in (config.get("groups") or [])]
+    top, chars = int(config.get("top", 20)), int(config.get("value_chars", 64))
+    counters = {f: Counter() for f in {*count_fields, *group_fields}}
+    missing = dict.fromkeys(counters, 0)
+    rows = 0
+    with _current(workdir).open(encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rows += 1
+            for f, c in counters.items():
+                if row.get(f) in (None, ""):
+                    missing[f] += 1
+                else:
+                    c[str(row[f])] += 1
+    stats: dict = {"rows": rows}
+    for f in count_fields:
+        common = counters[f].most_common(top)
+        stats.update({f"{f}_values": [" ".join(v.split())[:chars] for v, _ in common],
+                      f"{f}_counts": [n for _, n in common],
+                      f"{f}_other": sum(counters[f].values()) - sum(n for _, n in common),
+                      f"{f}_distinct": len(counters[f]), f"{f}_missing": missing[f]})
+    for f in group_fields:
+        sizes = sorted(counters[f].values())
+        stats.update({f"{f}_groups": len(sizes), f"{f}_largest": sizes[-1] if sizes else 0,
+                      f"{f}_singletons": sum(1 for n in sizes if n == 1),
+                      f"{f}_median": _percentile(sizes, 0.50), f"{f}_missing": missing[f]})
     return stats
 
 
@@ -1067,6 +1285,9 @@ for _fn in (scan_all, decontam_scan):
     _fn.risk_class = "read_only"
 # cairn-extensions#5 — the manifest describes the dataset; with store=s3 it uploads a report.
 dataset_manifest.risk_class = "external_write"
+# cairn-extensions#16 — fields.derive rewrites the working dataset; profile.fields only reads it.
+fields_derive.risk_class = "external_write"
+profile_fields.risk_class = "read_only"
 
 # ─── stage contracts (ADR-0118 D1/M3a, #2242 V1-C) ──────────────────────────
 # The readiness stages implement their shared stage contract (cairn-contracts-dataset-stages):
@@ -1079,7 +1300,14 @@ for _fn in (ingest_normalize, dedup_exact, dedup_near, decontam_apply, pii_redac
 # 1.1.0 revision, which requires them (1.0.0 stays published, unchanged).
 for _fn in (ingest_normalize, export_jsonl):
     _fn.implements = (f"contract://dataset.stage.{_fn.__name__}/1.1.0",)
-# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, same output); the manifest
-# stage is new.
+# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, output 1.2.0); the
+# manifest stage is new.
 ingest_normalize.implements = ("contract://dataset.stage.ingest_normalize/1.2.0",)
 dataset_manifest.implements = ("contract://dataset.stage.dataset_manifest/1.0.0",)
+# cairn-extensions#6 — the split kernel joins the stage contracts, with `export` and `register`.
+split.implements = ("contract://dataset.stage.split/1.0.0",)
+# cairn-extensions#16 — profile.tokens measures prompt + response on request (1.1.0); the two
+# field kernels are new.
+profile_tokens.implements = ("contract://dataset.stage.profile_tokens/1.1.0",)
+fields_derive.implements = ("contract://dataset.stage.fields_derive/1.0.0",)
+profile_fields.implements = ("contract://dataset.stage.profile_fields/1.0.0",)

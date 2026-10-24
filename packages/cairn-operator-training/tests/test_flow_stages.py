@@ -183,6 +183,7 @@ def test_spec_from_config_carries_tracking_fields(tmp_path):
 def test_ram_preflight_refuses_an_infeasible_train(monkeypatch):
     from operator_training import flow_stages
     monkeypatch.setattr(flow_stages, "_available_ram_bytes", lambda: 1.0 * 2**30)
+    monkeypatch.setattr(flow_stages, "_host_bytes_per_param", lambda config: flow_stages._TRAIN_BYTES_PER_PARAM)
     with pytest.raises(RuntimeError, match="refused before starting"):
         flow_stages._refuse_if_ram_infeasible("Qwen/Qwen2.5-0.5B-Instruct", {})
 
@@ -201,6 +202,26 @@ def test_ram_preflight_override_and_skip_paths(monkeypatch):
     # unknowable free RAM skips rather than blocks
     monkeypatch.setattr(flow_stages, "_available_ram_bytes", lambda: None)
     flow_stages._refuse_if_ram_infeasible("Qwen2.5-72B", {})
+
+
+def test_ram_preflight_uses_the_gpu_rate_on_a_cuda_box(monkeypatch):
+    """Found on the first GPU run: the CPU rate refused Qwen3-4B 4-bit QLoRA on a 15 GiB T4 box
+    for an estimated 26.1 GiB; the run peaked at 2.3 GiB. On CUDA the rate is the GPU path's."""
+    from operator_training import flow_stages
+    monkeypatch.setattr(flow_stages, "_available_ram_bytes", lambda: 10.0 * 2**30)
+    monkeypatch.setattr(flow_stages, "_host_bytes_per_param", lambda config: flow_stages._GPU_TRAIN_BYTES_PER_PARAM)
+    flow_stages._refuse_if_ram_infeasible("Qwen/Qwen3-4B-Base", {})
+    monkeypatch.setattr(flow_stages, "_host_bytes_per_param", lambda config: flow_stages._TRAIN_BYTES_PER_PARAM)
+    with pytest.raises(RuntimeError, match="CPU path"):
+        flow_stages._refuse_if_ram_infeasible("Qwen/Qwen3-4B-Base", {})
+
+
+def test_the_rate_follows_the_path_the_trainer_takes(monkeypatch):
+    import sys
+    from operator_training import flow_stages
+    monkeypatch.setitem(sys.modules, "torch", None)  # no torch ⇒ the CPU path
+    assert flow_stages._host_bytes_per_param({}) == flow_stages._TRAIN_BYTES_PER_PARAM
+    assert flow_stages._host_bytes_per_param({"validate_pipeline": True}) == flow_stages._TRAIN_BYTES_PER_PARAM
 
 
 def test_ram_preflight_passes_a_feasible_train(monkeypatch):
