@@ -87,6 +87,34 @@
         "index": "pypi",
         "name": "cairn-operator-training"
       }
+    },
+    {
+      "ref": "dataset-prep",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "Prepare a dataset once: pin the source, audit it, split it by group and register train, val and test versions with their roles.",
+      "kind": "domain_pack",
+      "pipelines": [
+        "prepare"
+      ],
+      "install": {
+        "index": "pypi",
+        "name": "cairn-pack-dataset-prep"
+      }
+    },
+    {
+      "ref": "finetune",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person.",
+      "kind": "domain_pack",
+      "pipelines": [
+        "sft"
+      ],
+      "install": {
+        "index": "pypi",
+        "name": "cairn-pack-finetune"
+      }
     }
   ]
 }

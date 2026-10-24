@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.profile_tokens.configuration/1.1.0",
+  "type": "object",
+  "properties": {
+    "max_seq_len": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": 0,
+      "description": "Rows above it are over length; 0 = no limit."
+    },
+    "over_length": {
+      "type": "string",
+      "default": "count",
+      "description": "count, drop or refuse; never truncate."
+    },
+    "tokenizer_path": {
+      "type": "string",
+      "description": "A local tokenizer."
+    },
+    "tokenizer_name": {
+      "type": "string",
+      "description": "A tokenizer id."
+    },
+    "base_model": {
+      "type": "string",
+      "description": "The base model, whose tokenizer is used."
+    },
+    "measure": {
+      "enum": [
+        "response",
+        "example"
+      ],
+      "default": "response",
+      "description": "response: the answer's tokens (as 1.0.0). example: prompt + response, what a training sequence holds (the chat template aside); max_seq_len then applies to it."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.profile_tokens",
+  "revision": "1.1.0",
+  "summary": "`profile.tokens` — token-length profile and over-length policy. 1.1.0: `measure: example` counts prompt + response and reports each side's p50/p95/max.",
+  "configuration": "contract://dataset.stage.profile_tokens.configuration/1.1.0",
+  "output": "contract://dataset.stage.profile_tokens.output/1.1.0"
+}

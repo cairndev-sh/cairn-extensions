@@ -90,8 +90,9 @@ def test_a_fidelity_subsample_replaces_the_governed_train_split(tmp_path):
     assert spec.train_uri.endswith("fidelity_sample.jsonl") and spec.extra["fidelity_n"] == 5
 
 
-def test_train_qlora_implements_the_1_1_0_stage_contract():
-    assert train_qlora.implements == ("contract://training.stage.train_qlora/1.1.0",)
+def test_train_qlora_implements_the_1_2_0_stage_contract():
+    # 1.2.0 (cairn-extensions#7) keeps every 1.1.0 knob and adds baseline_eval.
+    assert train_qlora.implements == ("contract://training.stage.train_qlora/1.2.0",)
 
 
 def test_the_1_1_0_configuration_admits_the_knobs_and_refuses_extra():

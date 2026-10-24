@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "training.stage.train_qlora",
+  "revision": "1.2.0",
+  "summary": "`train.qlora` — QLoRA/LoRA fine-tune through the proven train bodies: the hermetic stub under `stub`, else the local trainer on real CUDA. Writes train_result.json for the stages after it; returns the run's scalars. 1.1.0: the governed train/eval/test splits (train_uri, eval_uri, test_uri) and the batch, accumulation, checkpointing and dropout knobs; `extra` is not part of the configuration. 1.2.0: baseline_eval reports the base model's evaluation loss (the adapter disabled, after training).",
+  "configuration": "contract://training.stage.train_qlora.configuration/1.2.0",
+  "output": "contract://training.stage.train_qlora.output/1.2.0"
+}
