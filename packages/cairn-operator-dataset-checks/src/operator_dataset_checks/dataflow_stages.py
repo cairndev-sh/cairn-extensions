@@ -497,10 +497,33 @@ def _pii_redact_duckdb(workdir: Path, *, kinds=None) -> dict:
 def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
     """Deterministic group-aware train/val[/test] split — the ``SplitOp`` body.
     Terminal stage: writes ``workdir/splits/<name>.jsonl`` per split (the prep
-    convention); ``current.jsonl`` is left as-is for any sibling export stage."""
+    convention); ``current.jsonl`` is left as-is for any sibling export stage.
+
+    cairn-extensions#6 — ``config.export`` returns each split as a product of the stage: its
+    ``outputs.<name>.*`` stats (file, hash, rows; uploaded beside the export with ``store: s3``)
+    become one artifact descriptor per split in the runner. ``config.register`` names the
+    dataset versions ``<register>-train`` / ``-val`` / ``-test`` with roles training /
+    validation / test — the names and roles ``dataset/split`` registers — so the holdout door
+    finds the test version the trainer must not meet.
+
+    ``register`` needs the s3 store. A local split is a file in this leg's workdir, which the
+    engine makes as a temporary directory: a reboot or a tmp cleanup deletes it, and a control
+    plane on another machine cannot read it. With ``store: s3`` this stage uploads each split
+    itself (``_s3_upload``) and the version names the ``s3://`` object; with the local store
+    the version would name bytes that disappear (the core's own relay to the object store is
+    on only when ``artifact_store = s3``, and copies only what the control plane can read). It
+    is refused before the split runs."""
     from operator_dataset_checks.operators.split import run_split  # noqa: PLC0415 - data deps live in stage bodies (D5)
     from operator_dataset_checks.schemas.split import SplitInput  # noqa: PLC0415
 
+    export = bool(config.get("export", False))
+    register = str(config.get("register") or "").strip()
+    if register and not export:
+        raise ValueError("split: `register` needs `export: true` (only exported splits are registered)")
+    if export and int(config.get("shard_size", 0)):
+        raise ValueError("split: `export` needs shard_size 0 (one file per split is one product)")
+    if register:
+        _refuse_local_register("split", "split", config, workdir)
     out_dir = workdir / "splits"
     result = run_split(SplitInput(
         path=str(_current(workdir)), output_dir=str(out_dir),
@@ -519,7 +542,59 @@ def split(workdir: Path, config: dict, inputs: list[str]) -> dict:
         stats[f"rows_{name}"] = n
     for name, p in result.output_paths.items():
         stats[f"{name}_path"] = p
+    if export:
+        stats.update(_split_products(workdir, config, result.output_paths, register))
     return stats
+
+
+#: The role each split is registered for — the names and roles `dataset/split` uses (#2020).
+_SPLIT_ROLES = {"train": "training", "val": "validation", "test": "test"}
+
+
+def _split_products(workdir: Path, config: dict, paths: dict, register: str) -> dict:
+    """The ``outputs`` stats of an exported split: per non-empty split its file (local, or
+    uploaded with ``store: s3``), hash, size, rows and, with ``register``, the version name and
+    role. An empty split is no product: registering a 0-row version would only be refused."""
+    store = _export_store(config)
+    out: dict = {"outputs": []}
+    for name, path in paths.items():
+        digest, size, rows = _sha256_lines(Path(path))
+        if not rows:
+            continue
+        uri = (_s3_upload(Path(path), _s3_export_uri(workdir, f"{name}.jsonl", root=config.get("root")))
+               if store == "s3" else str(path))
+        out["outputs"].append(name)
+        out.update({f"outputs.{name}.output": uri, f"outputs.{name}.content_hash": digest,
+                    f"outputs.{name}.bytes": size, f"outputs.{name}.rows": rows,
+                    f"outputs.{name}.kind": "dataset"})
+        if register:
+            out[f"outputs.{name}.register_as"] = f"{register}-{name}"
+            out[f"outputs.{name}.register_role"] = _SPLIT_ROLES[name]
+    return out
+
+
+def _export_store(config: dict) -> str:
+    """``config.store``, else the environment's ``artifact_store`` backend: ``local`` or ``s3``."""
+    return str(config.get("store") or _artifact_store_backend()).lower()
+
+
+def _refuse_local_register(stage: str, noun: str, config: dict, workdir: Path) -> None:
+    """A stage asked to ``register`` a dataset version needs the s3 store: a local file is in
+    the leg's temporary workdir, which a reboot or a tmp cleanup deletes and a control plane on
+    another machine cannot read, so the version would name bytes that disappear. Raised before
+    the stage writes anything (owner decision 2026-10-24: registering needs an S3-compatible
+    store; local development uses MinIO or similar)."""
+    store = _export_store(config)
+    if store == "s3":
+        return
+    raise ValueError(
+        f"{stage}: `register` needs `store: s3`, and the store here is {store!r}. A local {noun} "
+        f"stays in this leg's temporary working directory ({workdir}), which a reboot or a tmp "
+        "cleanup deletes and a control plane on another machine cannot read, so the registered "
+        "versions would name files that disappear. Set `store: s3`, or `artifact_store = \"s3\"` "
+        "in the profile, with CAIRN_ARTIFACT_S3_BUCKET (and CAIRN_ARTIFACT_S3_ENDPOINT for MinIO "
+        f"or another S3-compatible store); or drop `register` to keep the {noun} local and "
+        "unregistered.")
 
 
 def scan_all(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -746,8 +821,15 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     <workdir-id>/<name>``, ``output`` = the ``s3://`` URI). Unset → the
     environment's ``artifact_store`` backend (profile → CAIRN_ARTIFACT_STORE →
     local). Always returns ``content_hash`` + ``bytes`` so the engine registers
-    a REAL descriptor, not a placeholder."""
+    a REAL descriptor, not a placeholder.
+
+    ``register`` needs the s3 store, as ``split``'s does: a version registered from a local
+    export would name a file in the leg's temporary workdir. Refused before anything is
+    written."""
     name = str(config.get("name", "output.jsonl"))
+    register_as = str(config.get("register") or "").strip()
+    if register_as:
+        _refuse_local_register("export.jsonl", "export", config, workdir)
     src = _current(workdir)
     # #2396 (ADR-0102 D1) — `rows` is the `rows_out` the intake verdict reads (0 → invalid_format),
     # counted in the same pass as the hash.
@@ -756,8 +838,7 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
     # export as a new dataset version once the leg lands (the box has no DB
     # access, D4) — the kernel only echoes the request into its stats, which
     # ride the descriptor to leg_executor's registration block.
-    register_as = str(config.get("register") or "").strip()
-    store = str(config.get("store") or _artifact_store_backend()).lower()
+    store = _export_store(config)
     if store == "s3":
         uri = _s3_upload(src, _s3_export_uri(workdir, name, root=config.get("root")))
         out = {"output": uri, "format": "jsonl", "store": "s3",
@@ -767,11 +848,9 @@ def export_jsonl(workdir: Path, config: dict, inputs: list[str]) -> dict:
         return out
     dest = workdir / name
     shutil.copyfile(src, dest)
-    out = {"output": str(dest), "format": "jsonl", "store": "local",
-           "content_hash": digest, "bytes": size, "rows": rows}
-    if register_as:  # was s3-branch-only — a local export silently never registered
-        out["register_as"] = register_as
-    return out
+    # a local export carries no `register_as`: a register request on this store was refused above
+    return {"output": str(dest), "format": "jsonl", "store": "local",
+            "content_hash": digest, "bytes": size, "rows": rows}
 
 
 def _artifact_store_backend() -> str:
@@ -1079,7 +1158,9 @@ for _fn in (ingest_normalize, dedup_exact, dedup_near, decontam_apply, pii_redac
 # 1.1.0 revision, which requires them (1.0.0 stays published, unchanged).
 for _fn in (ingest_normalize, export_jsonl):
     _fn.implements = (f"contract://dataset.stage.{_fn.__name__}/1.1.0",)
-# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, same output); the manifest
-# stage is new.
+# cairn-extensions#5 — ingest takes a Hub revision (configuration 1.1.0, output 1.2.0); the
+# manifest stage is new.
 ingest_normalize.implements = ("contract://dataset.stage.ingest_normalize/1.2.0",)
 dataset_manifest.implements = ("contract://dataset.stage.dataset_manifest/1.0.0",)
+# cairn-extensions#6 — the split kernel joins the stage contracts, with `export` and `register`.
+split.implements = ("contract://dataset.stage.split/1.0.0",)

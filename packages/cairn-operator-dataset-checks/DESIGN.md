@@ -79,8 +79,10 @@ intake. The chain is `ingest.normalize -> dedup.exact -> dedup.near -> decontam.
 pii.redact -> expectations.check -> profile.tokens -> export.jsonl`, and the leg that
 registers the export folds every stage's flat stats into ONE intake verdict
 (`admitted | degraded | blocked | invalid_format`) with a structured report on the
-version, which the launch door reads (`cairn/core/intake.py`). Three consequences the
-kernels here have to honour:
+version, which the launch door reads (`cairn/core/intake.py`). The registered export lives in
+the s3 store: `export.jsonl` (like `split`) refuses `register` on the local store, whose file
+would sit in the leg's temporary workdir (cairn-extensions#6; local development uses MinIO or
+another S3-compatible store). Three consequences the kernels here have to honour:
 
 * **A default-chain kernel degrades; an opted-in one refuses.** `dedup.near` is an honest
   skip (`checked: false` + a note, corpus untouched) without the `[minhash]` extra,
@@ -368,3 +370,4 @@ vacuously against an uninstalled copy: install the wheel before trusting them.
 | 2026-10 | `publish_fingerprints`, `anonymize`, `split`, `pii_scan`, `prep_gate` and `prep_review` implement the shared `dataset.*` contracts (`cairn-contracts-dataset` 1.1.0), so `clean`, `prep` and `decontaminate` reach no uncontracted operator or stage | #2242 |
 | 2026-10 | `dataset/fix_batch`, its on-box `cairn-dataset-fix` entrypoint and `_fix_pipeline` retired with the deprecated fix trio; `clean` is the remediation path | #2434, #2425 |
 | 2026-10-22 | Moved public to `cairndev-sh/cairn-extensions` with its two contract wheels (definitions byte for byte unchanged): the `sample.rows` hash method imports `cairn.core.dataflow.fidelity` (cairndev 0.2.0); `[compat]` and the `cairndev` pin are bounded to `>=0.2.0,<0.3`; `[pack].name` is the distribution name; the engine-chain tests run over a synthetic sample instead of a domain pack's example file. | |
+| 2026-10-23 | `cairndev>=0.2.1,<0.3`: `split`'s exported products and their roles need named stage outputs (ADR-0141, cairndev-sh/cairn#187), which ship in 0.2.1 (0.2.0 was published before they merged) | cairn-extensions#6 |
