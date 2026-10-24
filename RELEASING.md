@@ -12,27 +12,55 @@ On a tag, the workflow:
 1. **Plans.** `scripts/release.py plan` reads the distributions from the tree (none are listed
    by hand, so a new pack is picked up when it lands). It fails if the tag does not name a
    distribution in the tree at the version in its `pyproject.toml`, or if the tagged commit is
-   not on `main`. It also fails if any distribution's directory changed since that
+   not on `main` (`refs/remotes/origin/main`, fully qualified, so a tag named `origin/main` cannot
+   stand in for the branch). It also fails if any distribution's directory changed since that
    distribution's last tag while its version stayed the same or went down. That check covers
    every distribution, not only the tagged one.
-2. **Builds** an sdist and a wheel for every distribution with `uv build`.
-3. **Tests** the built wheels on the released `cairndev` from PyPI with
-   `scripts/test_wheels.sh --wheels dist`, so the files it tests are the files it publishes.
-4. **Waits** for approval on the `pypi` environment.
-5. **Publishes** the tagged distribution with `pypa/gh-action-pypi-publish`. Before uploading,
+2. **Checks the `pypi` environment** is protected (see the warning below), and fails if not.
+3. **Builds** an sdist and a wheel for every distribution with `uv build`, and stores them as
+   the run's artifact before any test code runs.
+4. **Tests** the built wheels on the released `cairndev` from PyPI with
+   `scripts/test_wheels.sh --wheels dist`, and fails if the tests changed any built file. The
+   publish job uses the stored artifact and runs only if this job passed.
+5. **Waits** for approval on the `pypi` environment.
+6. **Publishes** the tagged distribution with `pypa/gh-action-pypi-publish`. Before uploading,
    it asks PyPI which of the distribution's files it already holds and skips those, logging
    `skip: <file> is already on PyPI`. If PyPI holds every file, it logs
    `skip: <name> <version> is already on PyPI (every file); nothing to upload` and uploads
    nothing. A rerun therefore never fails on an identical filename. Any PyPI answer other than
    200 or 404 fails the job rather than being read as "not there".
-6. **Creates a GitHub Release** for the tag with that distribution's sdist and wheel.
+7. **Creates a GitHub Release** for the tag with that distribution's sdist and wheel.
 
 ## One-time setup (owner)
 
-### PyPI: a trusted publisher per distribution
+> **Warning: never register a PyPI publisher before the `pypi` environment is protected.**
+> GitHub creates an environment the first time a workflow names it, with no protection, and
+> PyPI's trusted publisher matches the environment by name only. A publisher registered before
+> step 1 is finished would let any tag push publish without an approval. The workflow refuses to
+> publish unless the environment has a required reviewer and tag-only deployment rules, but do
+> not rely on that check alone: do step 1 first.
 
-Go to <https://pypi.org/manage/account/publishing/> and add a **pending publisher** for each
-distribution, with these fields:
+### 1. GitHub: the protected `pypi` environment
+
+In *Settings → Environments*, create **`pypi`** with:
+
+- **Required reviewers:** the owner. Leave *Prevent self-review* off, since the owner pushes the
+  tag and approves the deployment.
+- **Deployment branches and tags:** *Selected branches and tags*, with the tag rule `*/v*` and no
+  branch rule.
+- **No secrets.** Trusted publishing needs none.
+
+Before every upload, the build job's `check-environment` step reads this environment through the
+GitHub API. It fails the run unless the environment exists, has at least one required reviewer,
+and allows deployments only from tag rules. A dry run reports the same problems as warnings.
+
+Recommended: in *Settings → Rules → Rulesets*, add a tag ruleset for `*/v*` that lets only the
+owner create, update or delete matching tags.
+
+### 2. PyPI: a trusted publisher per distribution
+
+Only after step 1, go to <https://pypi.org/manage/account/publishing/> and add a **pending
+publisher** for each distribution, with these fields:
 
 | Field | Value |
 |---|---|
@@ -60,17 +88,18 @@ reserve the name: register the publishers shortly before the first tags. Each la
 distribution needs its own publisher before its first tag, or the upload fails with an OIDC
 error. In that case, add the publisher and rerun the failed job.
 
-### GitHub: the `pypi` environment
+## What the checks do and do not cover
 
-In *Settings → Environments*, create **`pypi`** with:
-
-- **Required reviewers:** the owner. Leave *Prevent self-review* off, since the owner pushes the
-  tag and approves the deployment.
-- **Deployment branches and tags:** *Selected branches and tags*, with the tag rule `*/v*`.
-- **No secrets.** Trusted publishing needs none.
-
-Recommended: in *Settings → Rules → Rulesets*, add a tag ruleset for `*/v*` that lets only the
-owner create, update or delete matching tags.
+- **The version-bump check is strict.** An unbumped change to any file under any distribution's
+  directory blocks every distribution's release, not only its own. That includes a README, a
+  test or a comment. This is the policy: a change merged to `main` either ships with a new
+  version, or the next release waits until it is bumped.
+- **The sdist is published untested.** `test_wheels.sh --wheels dist` installs and tests only the
+  wheels. The sdist is built from the same tree in the same step, but nothing installs it before
+  it is uploaded.
+- **The dry run works only once `release.yml` is on the default branch.** GitHub offers
+  *Run workflow* (and `gh workflow run`) only for a workflow file on the default branch, so there
+  is no dry run until this workflow is merged to `main`.
 
 ## Release a distribution
 
@@ -87,9 +116,9 @@ owner create, update or delete matching tags.
    gh workflow run release.yml --repo cairndev-sh/cairn-extensions --ref main -f publish=false
    ```
 
-   The dry run plans, builds and tests every distribution, and its summary lists what each
-   distribution would upload (`upload: …`) or skip (`skip: …`). It publishes nothing and
-   creates no release.
+   The dry run plans, checks the environment (as a warning), builds and tests every
+   distribution, and its summary lists what each distribution would upload (`upload: …`) or skip
+   (`skip: …`). It publishes nothing and creates no release.
 4. **Tag** the merged commit, and push one tag per command:
 
    ```bash

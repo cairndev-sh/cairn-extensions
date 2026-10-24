@@ -18,6 +18,19 @@ releases on its own tag, ``<distribution>/vX.Y.Z``, and there is no repository-w
     A distribution whose every file is on PyPI is skipped as a whole. Any answer other than 200 or
     404 fails: an unknown state is never read as "not on PyPI".
 
+``python3 scripts/release.py mode --event E --ref-type T [--publish-input X] [--github-output FILE]``
+    Whether this run publishes: a tag push does; ``workflow_dispatch`` does only with
+    ``publish: true`` and only from a tag ref (``publish: true`` from a branch is refused);
+    anything else is a dry run.
+
+``python3 scripts/release.py check-environment --repo OWNER/REPO [--name pypi] [--warn-only] [--github-output FILE]``
+    Fails unless the GitHub environment exists, has at least one required reviewer, and may
+    deploy only from tags (custom deployment policies, every one of type ``tag``). GitHub creates a
+    referenced environment on first use with no protection, and PyPI's trusted publisher matches
+    the environment by name only, so without this check a tag pushed before the environment is
+    protected would publish unapproved. Reads ``GITHUB_TOKEN`` when set (the repository is public,
+    so the API also answers without one). ``--warn-only`` (the dry run) reports instead of failing.
+
 Versions are ``X.Y.Z`` (integers); anything else is refused, so the order of two versions is never
 a guess.
 """
@@ -26,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -42,6 +56,7 @@ import members as _members  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPI = "https://pypi.org/pypi"
+GITHUB_API = "https://api.github.com"
 _VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _TAG = re.compile(r"^(?P<name>[a-z0-9][a-z0-9-]*[a-z0-9])/v(?P<version>[0-9][0-9.]*)$")
 
@@ -151,7 +166,10 @@ def plan(root: Path, tag: str | None, main_ref: str | None) -> tuple[list[str], 
                 errors.append(f"tag {tag}: {d.path.as_posix()}/pyproject.toml says version {d.version}, "
                               f"not {m['version']}")
             selected = [d]
-        if main_ref is not None:
+        if main_ref is not None and not main_ref.startswith("refs/"):
+            # `origin/main` would resolve to a tag of that name before the remote branch
+            errors.append(f"--main {main_ref!r} must be a fully qualified ref (refs/remotes/origin/main)")
+        elif main_ref is not None:
             res = _git(root, "merge-base", "--is-ancestor", "HEAD", main_ref)
             if res.returncode == 1:
                 errors.append(f"tag {tag}: the tagged commit is not on {main_ref}; tag a commit of main")
@@ -160,14 +178,66 @@ def plan(root: Path, tag: str | None, main_ref: str | None) -> tuple[list[str], 
     return lines, selected, errors
 
 
-def default_fetch(url: str) -> tuple[int, bytes]:
+def http_get(url: str, headers: dict[str, str] | None = None) -> tuple[int, bytes]:
+    """(status, body) for a GET; an HTTP error is a status, a network error (URLError) is raised."""
     req = urllib.request.Request(url, headers={"Accept": "application/json",
-                                               "User-Agent": "cairn-extensions-release"})
+                                               "User-Agent": "cairn-extensions-release", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, b""
+
+
+def default_fetch(url: str) -> tuple[int, bytes]:
+    return http_get(url)
+
+
+def mode(event: str, ref_type: str, publish_input: str) -> tuple[bool, str | None]:
+    """(publish?, the refusal). Only a tag publishes; a dispatch publishes only when asked, from a tag."""
+    if event == "push":
+        if ref_type != "tag":
+            return False, f"a push of a {ref_type or 'non-tag'} ref never publishes; push a <distribution>/vX.Y.Z tag"
+        return True, None
+    if event == "workflow_dispatch" and publish_input == "true":
+        if ref_type != "tag":
+            return False, ("publish: true runs from a release tag (<distribution>/vX.Y.Z); this run is on a "
+                           f"{ref_type or 'non-tag ref'}. Use publish: false for a dry run.")
+        return True, None
+    return False, None
+
+
+def check_environment(repo: str, name: str, fetch: Callable[[str], tuple[int, bytes]],
+                      api: str = GITHUB_API) -> list[str]:
+    """What is missing from the environment's protection ([] when it is protected)."""
+    url = f"{api}/repos/{repo}/environments/{name}"
+    status, body = fetch(url)
+    if status == 404:
+        return [f"the {name!r} environment does not exist in {repo}; create it with a required reviewer and the "
+                f"*/v* tag rule before any release (RELEASING.md, step 1)"]
+    if status != 200:
+        return [f"cannot read the {name!r} environment ({url} answered {status}); refusing to publish unchecked"]
+    env = json.loads(body)
+    rules = env.get("protection_rules") or []
+    errors = []
+    if not any(r.get("type") == "required_reviewers" and r.get("reviewers") for r in rules):
+        errors.append(f"the {name!r} environment has no required reviewer; add the owner")
+    policy = env.get("deployment_branch_policy") or {}
+    if not policy.get("custom_branch_policies"):
+        errors.append(f"the {name!r} environment may deploy from any branch or tag; restrict it to the */v* tag rule")
+    else:
+        status, body = fetch(f"{url}/deployment-branch-policies?per_page=100")
+        if status != 200:
+            errors.append(f"cannot read the {name!r} environment's deployment policies (answered {status})")
+        else:
+            policies = json.loads(body).get("branch_policies", [])
+            if not policies:
+                errors.append(f"the {name!r} environment has no deployment tag rule; add */v*")
+            for p in policies:
+                if p.get("type", "branch") != "tag":
+                    errors.append(f"the {name!r} environment may deploy from branch {p.get('name')!r}; "
+                                  f"allow only the */v* tag rule")
+    return errors
 
 
 def files_of(dist: Dist, dist_dir: Path) -> list[Path]:
@@ -225,7 +295,8 @@ def _write_output(path: str | None, values: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT,
-         fetch: Callable[[str], tuple[int, bytes]] = default_fetch) -> int:
+         fetch: Callable[[str], tuple[int, bytes]] = default_fetch,
+         github_fetch: Callable[[str], tuple[int, bytes]] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan")
@@ -237,7 +308,44 @@ def main(argv: list[str] | None = None, root: Path = ROOT,
     s.add_argument("--out", required=True, type=Path)
     s.add_argument("--distribution", action="append", default=[])
     s.add_argument("--github-output")
+    m = sub.add_parser("mode")
+    m.add_argument("--event", required=True)
+    m.add_argument("--ref-type", default="")
+    m.add_argument("--publish-input", default="")
+    m.add_argument("--github-output")
+    e = sub.add_parser("check-environment")
+    e.add_argument("--repo", required=True)
+    e.add_argument("--name", default="pypi")
+    e.add_argument("--warn-only", action="store_true")
     args = ap.parse_args(argv)
+
+    if args.cmd == "mode":
+        publish, refusal = mode(args.event, args.ref_type, args.publish_input)
+        if refusal:
+            print(f"::error::release mode: {refusal}")
+            return 1
+        print(f"publish: {'true' if publish else 'false'}")
+        _write_output(args.github_output, {"publish": "true" if publish else "false"})
+        return 0
+
+    if args.cmd == "check-environment":
+        if github_fetch is None:
+            token = os.environ.get("GITHUB_TOKEN", "")
+            auth = {"Authorization": f"Bearer {token}"} if token else {}
+            gh_fetch = lambda url: http_get(url, {"Accept": "application/vnd.github+json", **auth})  # noqa: E731
+        else:
+            gh_fetch = github_fetch
+        try:
+            errors = check_environment(args.repo, args.name, gh_fetch)
+        except (OSError, ValueError) as exc:
+            errors = [f"cannot read the {args.name!r} environment: {exc}"]
+        level = "warning" if args.warn_only else "error"
+        for err in errors:
+            print(f"::{level}::release environment: {err}")
+        if errors:
+            return 0 if args.warn_only else 1
+        print(f"environment {args.name}: required reviewer and tag-only deployment rules in place")
+        return 0
 
     if args.cmd == "plan":
         try:

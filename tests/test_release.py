@@ -7,6 +7,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -122,11 +123,28 @@ def test_a_tag_off_main_is_refused(repo):
     (repo / "packs/cairn-pack-b/x").write_text("x")
     _member(repo, "packs/cairn-pack-b", "0.2.0")
     _commit(repo)
-    _, _, errors = release.plan(repo, "cairn-pack-b/v0.2.0", "main")
-    assert any("not on main" in e for e in errors)
+    _, _, errors = release.plan(repo, "cairn-pack-b/v0.2.0", "refs/heads/main")
+    assert any("not on refs/heads/main" in e for e in errors)
     _git(repo, "checkout", "-q", "main")
-    _, _, errors = release.plan(repo, "cairn-pack-b/v0.1.0", "main")
+    _, _, errors = release.plan(repo, "cairn-pack-b/v0.1.0", "refs/heads/main")
     assert errors == []
+
+
+def test_a_tag_named_like_the_main_branch_cannot_stand_in_for_it(repo):
+    # refs/remotes/origin/main is main; a tag literally named `origin/main` sits on an unmerged commit
+    _git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    _git(repo, "checkout", "-q", "-b", "side")
+    (repo / "packs/cairn-pack-b/x").write_text("x")
+    _member(repo, "packs/cairn-pack-b", "0.2.0")
+    _commit(repo)
+    _git(repo, "tag", "origin/main")
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+    short = subprocess.run(["git", "-C", str(repo), "rev-parse", "origin/main"], capture_output=True, text=True).stdout
+    assert short == head  # the hazard: the short name resolves to the tag, not the branch
+    _, _, errors = release.plan(repo, "cairn-pack-b/v0.2.0", "origin/main")
+    assert any("must be a fully qualified ref" in e for e in errors)
+    _, _, errors = release.plan(repo, "cairn-pack-b/v0.2.0", "refs/remotes/origin/main")
+    assert any("not on refs/remotes/origin/main" in e for e in errors)
 
 
 def test_plan_writes_the_selection_for_the_workflow(repo, tmp_path, capsys):
@@ -216,3 +234,97 @@ def test_select_reports_whether_anything_is_left_to_upload(repo, tmp_path):
     assert release.main(args, root=repo, fetch=fetch) == 0
     assert out.read_text() == "upload=false\n"
     assert release.main([*args[:-4], "--distribution", "nope"], root=repo, fetch=fetch) == 1
+
+
+def test_select_fails_when_pypi_cannot_be_reached(repo, tmp_path, monkeypatch, capsys):
+    _built(tmp_path / "dist", "cairn_pack_b-0.1.0")
+
+    def down(*a, **k):
+        raise urllib.error.URLError("network is unreachable")
+
+    monkeypatch.setattr(release.urllib.request, "urlopen", down)
+    args = ["select", "--dist-dir", str(tmp_path / "dist"), "--out", str(tmp_path / "up"),
+            "--distribution", "cairn-pack-b"]
+    assert release.main(args, root=repo) == 1
+    assert "network is unreachable" in capsys.readouterr().out
+    assert not (tmp_path / "up").exists() or not any((tmp_path / "up").iterdir())
+
+
+# --- mode: only a tag publishes ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("event, ref_type, publish_input, publish, refused", [
+    ("push", "tag", "", True, False),
+    ("push", "branch", "", False, True),
+    ("workflow_dispatch", "branch", "false", False, False),
+    ("workflow_dispatch", "tag", "false", False, False),
+    ("workflow_dispatch", "tag", "true", True, False),
+    ("workflow_dispatch", "branch", "true", False, True),
+])
+def test_only_a_tag_ref_publishes(event, ref_type, publish_input, publish, refused):
+    got, refusal = release.mode(event, ref_type, publish_input)
+    assert got is publish and (refusal is not None) is refused
+
+
+def test_publish_true_off_a_tag_fails_the_run(tmp_path, capsys):
+    out = tmp_path / "gh_output"
+    assert release.main(["mode", "--event", "workflow_dispatch", "--ref-type", "branch", "--publish-input", "true",
+                         "--github-output", str(out)]) == 1
+    assert "publish: true runs from a release tag" in capsys.readouterr().out
+    assert not out.exists()
+    assert release.main(["mode", "--event", "workflow_dispatch", "--ref-type", "branch", "--publish-input", "false",
+                         "--github-output", str(out)]) == 0
+    assert out.read_text() == "publish=false\n"
+
+
+# --- check-environment: the pypi environment must be protected before anything publishes ------
+
+_ENV = "https://api.github.com/repos/o/r/environments/pypi"
+_REVIEWER = {"type": "required_reviewers", "reviewers": [{"type": "User", "reviewer": {"login": "owner"}}]}
+
+
+def _github(env: dict | None, policies: list[dict] | None = None):
+    def fetch(url: str) -> tuple[int, bytes]:
+        if env is None:
+            return 404, b""
+        if url == _ENV:
+            return 200, json.dumps(env).encode()
+        if url == _ENV + "/deployment-branch-policies?per_page=100":
+            return 200, json.dumps({"branch_policies": policies or []}).encode()
+        return 404, b""
+    return fetch
+
+
+_PROTECTED = {"protection_rules": [_REVIEWER, {"type": "branch_policy"}],
+              "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+
+
+def test_a_protected_environment_passes():
+    assert release.check_environment("o/r", "pypi", _github(_PROTECTED, [{"name": "*/v*", "type": "tag"}])) == []
+
+
+@pytest.mark.parametrize("env, policies, needle", [
+    (None, None, "does not exist"),
+    ({"protection_rules": [], "deployment_branch_policy": None}, None, "no required reviewer"),
+    ({"protection_rules": [_REVIEWER], "deployment_branch_policy": None}, None, "any branch or tag"),
+    (_PROTECTED, [], "no deployment tag rule"),
+    (_PROTECTED, [{"name": "*/v*", "type": "tag"}, {"name": "main", "type": "branch"}], "from branch 'main'"),
+])
+def test_an_unprotected_environment_fails(env, policies, needle):
+    errors = release.check_environment("o/r", "pypi", _github(env, policies))
+    assert any(needle in e for e in errors), errors
+
+
+def test_check_environment_fails_closed_and_the_dry_run_only_warns(capsys):
+    args = ["check-environment", "--repo", "o/r"]
+    assert release.main(args, github_fetch=_github(None)) == 1
+    assert "::error::release environment:" in capsys.readouterr().out
+    assert release.main([*args, "--warn-only"], github_fetch=_github(None)) == 0
+    assert "::warning::release environment:" in capsys.readouterr().out
+    assert release.main(args, github_fetch=lambda url: (403, b"")) == 1
+
+    def down(url):
+        raise urllib.error.URLError("network is unreachable")
+
+    assert release.main(args, github_fetch=down) == 1
+    assert release.main(args, github_fetch=_github(_PROTECTED, [{"name": "*/v*", "type": "tag"}])) == 0

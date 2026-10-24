@@ -11,7 +11,9 @@
 #                                        reruns that tag's release
 #
 # Trusted publishing (OIDC) only: no API token is read anywhere. A file PyPI already holds is
-# skipped, never uploaded again, so a rerun is safe.
+# skipped, never uploaded again, so a rerun is safe. Nothing publishes unless the `pypi`
+# environment exists with a required reviewer and tag-only deployment rules (checked first:
+# GitHub would otherwise create it unprotected on first use). Every action is pinned by commit.
 name: release
 'on':
   push:
@@ -37,33 +39,26 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       files: ${{ steps.plan.outputs.files }}
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
       with:
         fetch-depth: 0   # every tag and main: the version-bump check diffs against each distribution's last tag
-    - uses: astral-sh/setup-uv@v7
+        persist-credentials: false
+    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
       with:
         version: 0.11.9
-    - name: Publish or dry run
+    - name: Publish or dry run (only a tag publishes; publish true off a tag is refused)
       id: mode
       env:
         EVENT: ${{ github.event_name }}
         REF_TYPE: ${{ github.ref_type }}
         PUBLISH_INPUT: ${{ inputs.publish }}
-      run: |
-        set -euo pipefail
-        if [ "$EVENT" = push ]; then
-          publish=true
-        elif [ "$PUBLISH_INPUT" = true ]; then
-          if [ "$REF_TYPE" != tag ]; then
-            echo "::error::publish: true runs from a release tag (<distribution>/vX.Y.Z); this run is on a branch. Use publish: false for a dry run."
-            exit 1
-          fi
-          publish=true
-        else
-          publish=false
-        fi
-        echo "publish=$publish" >> "$GITHUB_OUTPUT"
-        echo "publish: $publish"
+      run: python3 scripts/release.py mode --event "$EVENT" --ref-type "$REF_TYPE" --publish-input "$PUBLISH_INPUT" --github-output "$GITHUB_OUTPUT"
+    - name: The pypi environment is protected (a required reviewer, tag-only deployment rules)
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        WARN_ONLY: ${{ steps.mode.outputs.publish != 'true' && '--warn-only' || '' }}
+      run: python3 scripts/release.py check-environment --repo "$REPO" --name pypi $WARN_ONLY
     - name: Release plan (the tag names a distribution at its version; every changed distribution bumped its version)
       id: plan
       env:
@@ -71,7 +66,7 @@ jobs:
       run: |
         set -euo pipefail
         args=(plan --github-output "$GITHUB_OUTPUT")
-        if [ -n "$TAG" ]; then args+=(--tag "$TAG" --main origin/main); fi
+        if [ -n "$TAG" ]; then args+=(--tag "$TAG" --main refs/remotes/origin/main); fi
         python3 scripts/release.py "${args[@]}"
     - name: Build every distribution (sdist and wheel)
       run: |
@@ -80,10 +75,24 @@ jobs:
         members="$(python3 scripts/members.py)"   # fails on a member that cannot build
         for d in $members; do uv build -q "$d" -o dist; done
         ls -l dist
+    # The artifact the publish job uploads is stored before any test code runs, and the publish job
+    # runs only if this whole job (tests included) passed.
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: dist
+        path: dist/
+        if-no-files-found: error
+    - name: Record the built files' digests
+      run: find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/dist.sha256"
     - name: Test the built wheels on the released cairndev
       env:
         UV_PYTHON: '3.13'
       run: scripts/test_wheels.sh --wheels dist
+    - name: The tests left the built files untouched
+      run: |
+        set -euo pipefail
+        find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/dist.after.sha256"
+        diff "$RUNNER_TEMP/dist.sha256" "$RUNNER_TEMP/dist.after.sha256" || { echo "::error::dist/ changed while the tests ran"; exit 1; }
     - name: What would be uploaded (asks PyPI which files it already holds)
       env:
         SELECTED: ${{ steps.plan.outputs.distributions }}
@@ -92,11 +101,6 @@ jobs:
         args=(select --dist-dir dist --out "$RUNNER_TEMP/would-upload")
         for d in $SELECTED; do args+=(--distribution "$d"); done
         python3 scripts/release.py "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
-    - uses: actions/upload-artifact@v7
-      with:
-        name: dist
-        path: dist/
-        if-no-files-found: error
   publish:
     needs: build
     if: needs.build.outputs.publish == 'true'
@@ -108,8 +112,10 @@ jobs:
       contents: write   # the GitHub Release
       id-token: write   # PyPI trusted publishing
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/download-artifact@v8
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      with:
+        persist-credentials: false
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
       with:
         name: dist
         path: dist/
@@ -124,7 +130,7 @@ jobs:
       with:
         packages-dir: upload/
     - name: GitHub Release with the distribution's files
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
       with:
         files: dist/${{ needs.build.outputs.files }}
         fail_on_unmatched_files: true
