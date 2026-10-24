@@ -3,21 +3,30 @@
 #
 #   scripts/test_wheels.sh                 # the RELEASED cairndev each wheel's pins select (PyPI)
 #   scripts/test_wheels.sh --core main     # the core's main branch instead (the nightly job)
+#   scripts/test_wheels.sh --wheels dist   # the wheels already built into dist/, not the source
+#                                          # directories (the release job: the wheels it tests are
+#                                          # the files it publishes)
 #
 # One fresh venv: every buildable member installed as a wheel (with its `test` extra when it
-# declares one), then: nothing private is installed, the repository's own tests, the catalog
-# is current, each wheel's tests, `cairn pack sync --check` per operator pack, `cairn pack check`,
-# and the core's contract resolver over every installed contract wheel.
+# declares one; with --wheels, that member's built wheel, which must be in DIR), then: nothing
+# private is installed, the repository's own tests, the catalog is current, each wheel's tests,
+# `cairn pack sync --check` per operator pack, `cairn pack check`, and the core's contract
+# resolver over every installed contract wheel.
 # The interpreter is $UV_PYTHON (default 3.13). Exits non-zero on the first failure.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+usage() { echo "usage: scripts/test_wheels.sh [--core release|main] [--wheels DIR]" >&2; exit 2; }
 core=release
-case "$#:${1:-}" in
-  0:) ;;
-  2:--core) core="$2" ;;
-  *) echo "usage: scripts/test_wheels.sh [--core release|main]" >&2; exit 2 ;;
-esac
+wheel_dir=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --core) [ $# -ge 2 ] || usage; core="$2"; shift 2 ;;
+    --wheels) [ $# -ge 2 ] || usage; wheel_dir="$2"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+if [ -n "$wheel_dir" ] && [ ! -d "$wheel_dir" ]; then echo "test_wheels: --wheels $wheel_dir is not a directory" >&2; exit 2; fi
 case "$core" in release|main) ;; *) echo "test_wheels: --core takes release or main, not $core" >&2; exit 2 ;; esac
 
 # every member must be buildable: members.py fails on one that is not, instead of skipping it
@@ -31,13 +40,28 @@ uv venv -q "$venv" --python "${UV_PYTHON:-3.13}"
 export VIRTUAL_ENV="$venv" PATH="$venv/bin:$PATH"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-ci-dummy}" CAIRN_STORAGE="" OBS_STORAGE=""
 
+# the install requirement for one member: its source directory, or with --wheels its built wheel
+# (exactly one, by its normalized name and version), with the `test` extra when it declares one
+spec_of() {
+  python - "$1" "$wheel_dir" <<'PY'
+import pathlib, re, sys, tomllib
+member, wheels = pathlib.Path(sys.argv[1]), sys.argv[2]
+project = tomllib.loads((member / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+extra = "[test]" if "test" in project.get("optional-dependencies", {}) else ""
+if not wheels:
+    print(f"./{member.as_posix()}{extra}")
+    sys.exit()
+stem = re.sub(r"[-_.]+", "_", project["name"]).lower() + "-" + project["version"]
+found = sorted(pathlib.Path(wheels).glob(f"{stem}-*.whl"))
+if len(found) != 1:
+    sys.exit(f"test_wheels: expected one wheel {stem}-*.whl in {wheels}, found {len(found)}")
+print(f"{project['name']}{extra} @ {found[0].resolve().as_uri()}")
+PY
+}
 specs=()
 for w in "${wheels[@]+"${wheels[@]}"}"; do
-  if python -c 'import sys,tomllib; d=tomllib.load(open(sys.argv[1]+"/pyproject.toml","rb")); sys.exit(0 if "test" in d["project"].get("optional-dependencies", {}) else 1)' "$w"; then
-    specs+=("./$w[test]")
-  else
-    specs+=("./$w")
-  fi
+  spec="$(spec_of "$w")"
+  specs+=("$spec")
 done
 if [ ${#specs[@]} -eq 0 ]; then
   echo "no wheels yet: installing the released cairndev only"

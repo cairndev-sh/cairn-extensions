@@ -27,7 +27,7 @@ jobs:
     - name: Lint (the correctness rules, pyproject.toml [tool.ruff.lint])
       run: uvx ruff check .
     - name: The policy scripts' own tests
-      run: uvx --python 3.13 --with pytest-asyncio pytest tests/test_check_leaks.py tests/test_check_venv.py tests/test_members.py -q -p no:cacheprovider
+      run: uvx --python 3.13 --with pytest-asyncio pytest tests/test_check_leaks.py tests/test_check_venv.py tests/test_members.py tests/test_release.py -q -p no:cacheprovider
   python:
     runs-on: ubuntu-latest
     strategy:

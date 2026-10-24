@@ -47,6 +47,10 @@ cairn doctor && cairn pack check
 
 Each package README lists its extras.
 
+The `install` entries in `catalog.json` name PyPI (`"index": "pypi"`). Each one becomes true
+when its distribution is first published; until then, use the checkout install above.
+[RELEASING.md](RELEASING.md) describes how a distribution is published.
+
 ### With sign-in on (cairn 0.2.0 and later)
 
 With sign-in on, cairn scopes connections and secrets to the account that owns the run's
@@ -80,6 +84,9 @@ CI (`.github/workflows/ci.yml`) runs `policy` (the leak scan, lint, the checks' 
 on 3.12, 3.13 and 3.14, and `package` (builds every wheel). The private-token list the leak scan
 checks lives in the repository secret `LEAK_SCAN_PRIVATE_TOKENS` (one token per line), never in the tree. Every commit carries a DCO
 sign-off (`git commit -s`); the `dco` check refuses one without it.
+
+Releases (`.github/workflows/release.yml`) are one tag per distribution, `<distribution>/vX.Y.Z`,
+published to PyPI with trusted publishing after the owner approves. See [RELEASING.md](RELEASING.md).
 
 A pack's `pack.toml` declares `[compat] cairn_engine` as a bounded range and its
 `pyproject.toml` pins `cairndev` to the same range. A wheel that needs extra packages for its
