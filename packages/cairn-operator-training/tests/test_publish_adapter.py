@@ -49,13 +49,14 @@ def test_hf_target_uploads_folder(adapter_dir, monkeypatch):
     assert r.metrics["published_uri"] == "hf://acme/adapter"
     assert calls["create_repo"]["repo_id"] == "acme/adapter"
     assert calls["upload_folder"]["folder_path"] == adapter_dir
+    assert calls["upload_folder"]["allow_patterns"] == ["adapter_model.safetensors"]
 
 
 def _fake_client(n_objects):
     """A boto3 stand-in whose listing reports ``n_objects`` under any prefix.
 
     #1715 — the publish now VERIFIES the upload landed, because
-    ``checkpoint_sync.upload_dir`` is best-effort by contract (it logs and
+    ``checkpoint_sync.upload_files`` is best-effort by contract (it logs and
     returns on error, never raises), so a mocked-or-real call returning cleanly
     proves nothing. Every s3 test therefore has to say what S3 now holds.
     """
@@ -74,7 +75,8 @@ def test_s3_target_uploads_dir(adapter_dir, monkeypatch):
     from operator_training import checkpoint_sync
     up = {}
     monkeypatch.setattr(checkpoint_sync, "s3_target_from_env", lambda: ("buck", "cairn-checkpoints", "m"))
-    monkeypatch.setattr(checkpoint_sync, "upload_dir", lambda d, b, k: up.update(dir=d, bucket=b, key=k))
+    monkeypatch.setattr(checkpoint_sync, "upload_files",
+                        lambda d, names, b, k: up.update(dir=d, names=names, bucket=b, key=k))
     monkeypatch.setattr(checkpoint_sync, "_client", lambda: _fake_client(1))  # the fixture's 1 file
 
     spec = TrainSpec(dataset_uri="x", output_name="m", artifact_target="s3")
@@ -82,6 +84,7 @@ def test_s3_target_uploads_dir(adapter_dir, monkeypatch):
     _publish_adapter(spec, r)
     assert r.metrics["published_uri"] == "s3://buck/cairn-checkpoints/m/adapter/"
     assert up["bucket"] == "buck" and up["key"] == "cairn-checkpoints/m/adapter"
+    assert up["names"] == ["adapter_model.safetensors"]
 
 
 def test_s3_without_bucket_records_error_not_raise(adapter_dir, monkeypatch):
@@ -112,13 +115,13 @@ def test_publish_failure_is_best_effort(adapter_dir, monkeypatch):
 # ── #1715 — the publish is VERIFIED, and the two paths fail differently ──────
 
 def test_s3_publish_that_silently_drops_files_is_NOT_reported_as_published(adapter_dir, monkeypatch):
-    """upload_dir swallows its own errors, so the old code recorded published_uri
+    """upload_files swallows its own errors, so the old code recorded published_uri
     for an upload that never landed. The verification is what makes the URI mean
     something."""
     from operator_training import checkpoint_sync
 
     monkeypatch.setattr(checkpoint_sync, "s3_target_from_env", lambda: ("buck", "p", "m"))
-    monkeypatch.setattr(checkpoint_sync, "upload_dir", lambda d, b, k: None)  # "succeeds", uploads nothing
+    monkeypatch.setattr(checkpoint_sync, "upload_files", lambda d, names, b, k: None)  # "succeeds", uploads nothing
     monkeypatch.setattr(checkpoint_sync, "_client", lambda: _fake_client(0))
 
     spec = TrainSpec(dataset_uri="x", output_name="m", artifact_target="s3")

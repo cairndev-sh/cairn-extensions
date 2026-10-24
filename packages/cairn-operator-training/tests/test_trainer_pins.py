@@ -77,8 +77,14 @@ def test_gpu_only_pins_stay_out_of_the_cpu_extra():
         assert name not in local
 
 
+#: What `[gpu]` carries beside the trainer pins: the S3 client for s3:// data, checkpoint
+#: mirroring and `artifact_target: s3` (transport, not part of the trainer environment).
+_GPU_TRANSPORT = {"boto3": ">=1.34"}
+
+
 def test_gpu_extra_is_the_pins_exactly():
     # A GPU box is installed from this extra (`pip install 'cairn-operator-training[gpu]'`),
     # so it has to be the same set, version for version, or the proven ssh path proves a
     # different environment from the one the image runs.
-    assert _extra("gpu") == {name: f"=={version}" for name, version in TRAINER_PINS.items()}
+    assert _extra("gpu") == {**{name: f"=={version}" for name, version in TRAINER_PINS.items()},
+                             **_GPU_TRANSPORT}

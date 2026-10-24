@@ -36,9 +36,14 @@ def _base_metrics(stats: Any) -> dict[str, Any]:
 
     ``trainer_env`` (#1622) is the env fingerprint — the versions this run
     actually trained on, next to the numbers they produced.
+
+    ``steps`` is the optimizer steps the run took (``TrainOutput.global_step``), the
+    figure ``train.qlora`` reports and the ``promote-model`` gate shows; the CPU
+    path (``operators/local``) reports the same key.
     """
     metrics: dict[str, Any] = {
         "train_loss": float(getattr(stats, "training_loss", 0.0) or 0.0),
+        "steps": int(getattr(stats, "global_step", 0) or 0),
         "trainer_env": trainer_env(),
     }
     for key in ("train_runtime", "train_samples_per_second", "train_steps_per_second",
@@ -137,9 +142,12 @@ def _save_adapter(spec: dict[str, Any], model: Any, tokenizer: Any, out_dir: str
     if target == "s3":
         checkpoint_target = checkpoint_sync.s3_target_from_env()
         if checkpoint_target is not None:
+            from operator_training.publish import adapter_files  # noqa: PLC0415 - stdlib helper
+
             bucket, prefix, run_key = checkpoint_target
             key_prefix = f"{prefix}/{run_key}/adapter"
-            checkpoint_sync.upload_dir(out_dir, bucket, key_prefix)
+            # the adapter only: out_dir also holds checkpoint-*/ (optimizer state)
+            checkpoint_sync.upload_files(out_dir, adapter_files(out_dir), bucket, key_prefix)
             return f"s3://{bucket}/{key_prefix}/"
         # No checkpoint bucket configured — fall back to the local dir (best-effort).
         return out_dir
@@ -173,7 +181,8 @@ def _preflight_mlflow() -> str:
         mlflow.MlflowClient().search_experiments(max_results=1)
         return ""
     except ImportError:
-        return "mlflow not installed on this box"
+        return ("mlflow is not installed on this box: install "
+                "'cairn-operator-training[gpu,track-mlflow]' to report to mlflow")
     except Exception as e:  # noqa: BLE001 — ANY probe failure means: train without tracking
         return f"{type(e).__name__}: {e}"
     finally:
@@ -255,6 +264,13 @@ def _mlflow_training_run(spec: dict[str, Any]):
         return _NoRun()
 
 
+def _trained_on(spec: dict[str, Any]) -> str:
+    """The data the run trained on: the governed train split when given (#4), else dataset_uri."""
+    from operator_training.splits import train_source  # noqa: PLC0415 - stdlib helper
+
+    return train_source(spec)
+
+
 def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> dict[str, Any]:
     """Inside the re-opened training run: log the adapter dir as the ``adapter``
     artifact and, when ``registered_model_name`` is set, create a Model Registry
@@ -277,11 +293,11 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
             # #1714 — read the RESOLVED local path (pandas chokes on the pin the
             # same way `datasets` does); `source` keeps the DECLARED uri, pin and
             # all, because that is the lineage identity worth recording.
-            df = pd.read_json(dataset_fetch.resolve_dataset_uri(str(spec["dataset_uri"])),
+            df = pd.read_json(dataset_fetch.resolve_dataset_uri(_trained_on(spec)),
                               lines=True)
-            ds = mlflow.data.from_pandas(df, source=str(spec["dataset_uri"]),
+            ds = mlflow.data.from_pandas(df, source=_trained_on(spec),
                                          name=os.path.basename(
-                                             dataset_fetch.split_pin(str(spec["dataset_uri"]))[0]))
+                                             dataset_fetch.split_pin(_trained_on(spec))[0]))
             mlflow.log_input(ds, context="training")
             out["mlflow_dataset_digest"] = str(getattr(ds, "digest", "") or "")
         except Exception as e:  # noqa: BLE001 - best-effort
@@ -295,7 +311,7 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
             tags = {"adapter_artifact_uri": f"runs:/{run_id}/adapter",
                     "base_model": str(spec.get("base_model", "")),
                     "method": str(spec.get("method", "qlora")),
-                    "dataset_uri": str(spec.get("dataset_uri", ""))}
+                    "dataset_uri": _trained_on(spec)}
             if spec.get("init_adapter_uri"):  # two-stage lineage: which adapter this continued
                 tags["init_adapter_uri"] = str(spec["init_adapter_uri"])
             if ck:
@@ -313,17 +329,19 @@ def _mlflow_log_and_register(spec: dict[str, Any], out_dir: str, mlrun: Any) -> 
         return {"mlflow_run_id": run_id, "mlflow_register_error": f"{type(e).__name__}: {e}"}
 
 
-def main(spec: dict[str, Any], reporter: Any = None) -> dict[str, Any]:
+def main(spec: dict[str, Any], reporter: Any = None, *, output_dir: str | None = None) -> dict[str, Any]:
     # #2025: the live channel — the reporter a caller hands in (the SSH path's
     # local_entry, the in-process operator) or the one the environment / the
     # `_live_env` a submit tucked into the spec describes (a container entrypoint).
+    # `output_dir`: where checkpoints and the adapter go — a flow stage passes one under its
+    # job workdir (checkpoint_sync.trainer_output_dir); unset = /tmp/<output_name>.
     from operator_training.reporting import make_report_callback, reporter_for  # noqa: PLC0415 — keeps `import train_entry` light for the submitters
 
     spec = dict(spec)
     live_env = spec.pop("_live_env", None)
     reporter = reporter if reporter is not None else reporter_for({"_live_env": live_env} if live_env else None)
     try:
-        return _main(spec, reporter, make_report_callback)
+        return _main(spec, reporter, make_report_callback, output_dir)
     finally:
         close = getattr(reporter, "close", None)
         if callable(close):
@@ -340,7 +358,8 @@ def _stage(reporter: Any, name: str) -> None:
         pass
 
 
-def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dict[str, Any]:
+def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any,
+          output_dir: str | None = None) -> dict[str, Any]:
     # Deferred heavy imports — only available on the GPU backend image.
     # unsloth MUST be imported before trl/transformers/peft: it patches them
     # (SFTConfig/SFTTrainer included). Importing trl first leaves a half-patched
@@ -354,7 +373,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # #1709 — resolve + PREFLIGHT tracking before any heavy work: an unreachable
     # sink is dropped here (with the reason kept for the metrics), never fatal.
     _report_to, _tracking_error = _tracking_setup(spec)
-    out_dir = f"/tmp/{spec.get('output_name', 'adapter')}"
+    out_dir = output_dir or checkpoint_sync.trainer_output_dir(spec.get("output_name", "adapter"))
     _stage(reporter, "download")
     # ADR-0064 §1/§2: pull any durable S3 checkpoint down BEFORE training starts,
     # so a relaunch on a fresh box resumes via resume_from_checkpoint. No-op if no
@@ -366,15 +385,21 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # #1714 — route through the pack's OWN resolver instead of handing the raw
     # spec value to `datasets`: it strips the `#sha256=` pin a launch-resolved
     # `dataset:` ref carries (fsspec treats the fragment as part of the object
-    # key → FileNotFoundError), fetches s3:// via boto3 (a base dep, rather than
-    # relying on s3fs being present on the box), and VERIFIES the bytes against
+    # key → FileNotFoundError), fetches s3:// via boto3 (the `[gpu]` extra, imported
+    # only for an s3:// URI; not s3fs), and VERIFIES the bytes against
     # the pin. This entry had bypassed `dataset_fetch` entirely, which is why the
     # retrieval rule was decorative on the GPU path.
-    dataset_path = dataset_fetch.resolve_dataset_uri(str(spec["dataset_uri"]))
-    ds = load_dataset("json", data_files=dataset_path, split="train")
-    # only `messages` survives, as in distill_entry: a raw `prompt` column would steer
-    # trl's SFTTrainer onto its prompt-completion path instead of the rendered `text`
-    ds = ds.map(_row_messages, with_indices=True, remove_columns=ds.column_names)
+    # cairn-extensions#4: the training data is `train_uri` when set (else `dataset_uri`), and a
+    # governed `eval_uri` is mapped here too, so a bad row in either fails before the model
+    # loads. `test_uri` is never opened by the trainer (splits.py).
+    from operator_training import splits  # noqa: PLC0415 - stdlib helper, keeps this entry's imports lazy
+
+    _rows: dict[str, Any] = {}
+    for _uri in [splits.train_source(spec)] + ([str(spec["eval_uri"])] if spec.get("eval_uri") else []):
+        _d = load_dataset("json", data_files=dataset_fetch.resolve_dataset_uri(_uri), split="train")
+        # only `messages` survives, as in distill_entry: a raw `prompt` column would steer
+        # trl's SFTTrainer onto its prompt-completion path instead of the rendered `text`
+        _rows[_uri] = _d.map(_row_messages, with_indices=True, remove_columns=_d.column_names)
 
     init_uri = str(spec.get("init_adapter_uri") or "").strip()
     if init_uri:
@@ -401,6 +426,10 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
             load_in_4bit=spec.get("method", "qlora") == "qlora",
         )
         peft_kw: dict[str, Any] = {"r": spec.get("lora_r", 16), "lora_alpha": spec.get("lora_alpha", 16)}
+        if spec.get("lora_dropout") is not None:
+            peft_kw["lora_dropout"] = float(spec["lora_dropout"])
+        if spec.get("gradient_checkpointing") is not None:
+            peft_kw["use_gradient_checkpointing"] = bool(spec["gradient_checkpointing"])
         tm = spec.get("target_modules") or []
         if isinstance(tm, str):  # a pipeline `with:` list may arrive stringified ("['q_proj', 'v_proj']" / "q_proj,v_proj")
             tm = [t.strip(" '\"") for t in tm.strip("[] ").split(",") if t.strip(" '\"")]
@@ -414,13 +443,16 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     # column: unsloth's patched SFTTrainer refuses a conversational dataset under
     # packing without a formatting_func (found live on the C2 GPU run, 2026-08-19),
     # and a pre-rendered text column is the one shape every trl/unsloth pair takes.
-    ds = ds.map(lambda r: {"text": tokenizer.apply_chat_template(r["messages"], tokenize=False)})
-    eval_split = float(spec.get("eval_split", 0.1) or 0.0)
-    if eval_split > 0:
-        parts = ds.train_test_split(test_size=eval_split, seed=seed)
-        train_ds, eval_ds = parts["train"], parts["test"]
-    else:
-        train_ds, eval_ds = ds, None
+    # cairn-extensions#7 — a base model's tokenizer has no chat template; ChatML is used, and recorded.
+    from operator_training.chat_template import ensure_chat_template  # noqa: PLC0415 - stdlib helper
+    _chat_template = ensure_chat_template(tokenizer)
+
+    def _render(d: Any) -> Any:
+        return d.map(lambda r: {"text": tokenizer.apply_chat_template(r["messages"], tokenize=False)})
+
+    train_ds, eval_ds, _eval_source = splits.train_and_eval(spec, lambda uri: _render(_rows[uri]), seed=seed)
+    # TRL's own defaults (8 per device, no accumulation) unless the spec says otherwise
+    _batch = splits.batch_args(spec, per_device=8, accumulation=1)
 
     eval_steps = int(spec.get("eval_steps", 50) or 0)
     save_steps = int(spec.get("save_steps", 50) or 50)
@@ -434,6 +466,7 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
         num_train_epochs=spec.get("epochs", 1.0),
         max_steps=spec.get("max_steps", 0) or -1,
         learning_rate=spec.get("learning_rate", 2e-4),
+        **_batch,
         # Mid-training eval → metrics (loss curve) for early read on convergence.
         eval_strategy=("steps" if (eval_ds is not None and eval_steps) else "no"),
         eval_steps=eval_steps or None,
@@ -483,6 +516,8 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     adapter_uri = _save_adapter(spec, model, tokenizer, out_dir)
 
     metrics = _base_metrics(stats)
+    metrics.update(splits.recorded(spec, _batch, _eval_source))
+    metrics["chat_template"] = _chat_template
     if _resumed_from:
         # #1749 — a resumed run is NOT the same experiment as a fresh one, and
         # the difference used to be invisible in the record. A reader comparing
@@ -501,6 +536,9 @@ def _main(spec: dict[str, Any], reporter: Any, make_report_callback: Any) -> dic
     with mlrun:
         if eval_ds is not None:
             metrics["eval_loss"] = float(trainer.evaluate().get("eval_loss", 0.0))
+        # cairn-extensions#7 — the base model on the same rows: the adapter switched off, after training
+        metrics.update(splits.baseline(
+            spec, lambda: splits.evaluate_with_adapter_disabled(model, trainer), has_eval=eval_ds is not None))
         reg = _mlflow_log_and_register(spec, out_dir, mlrun)
         if reg:
             metrics.update(reg)

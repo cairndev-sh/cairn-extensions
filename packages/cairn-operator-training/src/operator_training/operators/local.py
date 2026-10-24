@@ -124,20 +124,21 @@ def _use_gpu_unsloth(spec: TrainSpec) -> bool:
     if _validating(spec):
         return False
     try:
-        import torch  # noqa: PLC0415 — base dep; a cheap cuda probe
+        import torch  # noqa: PLC0415 — the [local]/[gpu] extra; a cheap cuda probe
         return bool(torch.cuda.is_available())
     except Exception:  # noqa: BLE001 — no torch / probe failure ⇒ CPU path
         return False
 
 
-def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None) -> TrainResult:
+def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None, out_dir: str | None = None) -> TrainResult:
     """Hand a real GPU run to the unsloth engine (``train_entry.main``) and wrap its
     result as a ``TrainResult``. ``adapter_uri`` is forced to the LOCAL dir
-    ``train_entry`` always writes (``save_pretrained`` → ``/tmp/<output_name>``) so the
-    SSH governed path can SFTP-fetch the adapter back regardless of any HF/S3 push the
-    spec also requested. unsloth is a GPU-only optional dep, imported lazily inside
-    ``train_entry`` — a GPU box without it fails loud ('No module named unsloth'),
-    which is the honest signal to install it, not a silent CPU fallback.
+    ``train_entry`` writes (``save_pretrained`` → ``out_dir``, which
+    :func:`checkpoint_sync.trainer_output_dir` names) so the caller publishes it to its
+    real ``artifact_target`` regardless of any HF/S3 push the spec also requested.
+    unsloth is a GPU-only optional dep, imported lazily inside ``train_entry`` — a GPU box
+    without it fails loud ('No module named unsloth'), which is the honest signal to install
+    it, not a silent CPU fallback.
 
     NOTE (#553 gap): this path publishes metrics only at completion — it does not
     stream a live loss curve into metrics.json the way the CPU path does (train_entry
@@ -149,8 +150,9 @@ def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None) -> TrainResult:
     # on the SSH path the single publish point is local_entry (which honors the real
     # artifact_target after training), so this avoids a double-push. train_entry run as its
     # own entrypoint still pushes with the real target.
-    result = _gpu_main({**spec.model_dump(), "artifact_target": "local"}, reporter=reporter)
-    local_dir = f"/tmp/{spec.output_name}"  # train_entry.main's save_pretrained target
+    local_dir = out_dir or checkpoint_sync.trainer_output_dir(spec.output_name)
+    result = _gpu_main({**spec.model_dump(), "artifact_target": "local"}, reporter=reporter,
+                       output_dir=local_dir)
     return TrainResult(
         status="succeeded",
         backend="unsloth-gpu",
@@ -169,7 +171,7 @@ def _stage(reporter: Any, name: str) -> None:
 
 
 async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
-                       reporter: Any = None) -> TrainResult:
+                       reporter: Any = None, output_dir: str | None = None) -> TrainResult:
     """Run a real LoRA SFT and return real metrics + adapter. On a CUDA GPU this hands
     off to the unsloth 4-bit QLoRA engine (#6); on CPU/MPS (incl. validation mode) it
     runs the hermetic plain-LoRA path below.
@@ -177,9 +179,13 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     ``reporter`` (#2025) is the run's typed reporter — ``ctx.report`` in-process,
     a :class:`operator_training.live.LiveReporter` on a box — and receives the
     stages, the loss/eval curve, checkpoints and the final scalars through
-    :func:`operator_training.reporting.make_report_callback`."""
+    :func:`operator_training.reporting.make_report_callback`.
+
+    ``output_dir`` is where checkpoints and the adapter go; unset = ``/tmp/<output_name>``
+    (:func:`checkpoint_sync.trainer_output_dir`)."""
+    out_dir = output_dir or checkpoint_sync.trainer_output_dir(spec.output_name)
     if _use_gpu_unsloth(spec):
-        return _train_gpu_unsloth(spec, reporter)
+        return _train_gpu_unsloth(spec, reporter, out_dir)
     _require_local()
     import inspect  # noqa: PLC0415
 
@@ -190,7 +196,6 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
     device = _device()
-    out_dir = f"/tmp/{spec.output_name}"
     _stage(reporter, "download")
     os.makedirs(out_dir, exist_ok=True)
     # ADR-0064 §1/§2: pull any durable S3 checkpoint down BEFORE training starts,
@@ -209,7 +214,8 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float32)
     model = get_peft_model(model, LoraConfig(
-        r=spec.lora_r, lora_alpha=spec.lora_alpha, lora_dropout=0.05, task_type="CAUSAL_LM",
+        r=spec.lora_r, lora_alpha=spec.lora_alpha,
+        lora_dropout=0.05 if spec.lora_dropout is None else spec.lora_dropout, task_type="CAUSAL_LM",
     ))
 
     def _load(uri):
@@ -220,15 +226,18 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
             return load_dataset("json", data_files=uri, split="train")
         return load_dataset(uri, split="train")
 
-    ds = _load(spec.dataset_uri).map(_to_text_fn(tok))
-    # keep it small + bounded for CPU/MPS — enough rows to cover the step budget.
-    ds = ds.select(range(min(len(ds), max(16, steps * 8))))
-    eval_split = float(spec.eval_split or 0.0)
-    if eval_split > 0 and len(ds) > 4:
-        parts = ds.train_test_split(test_size=eval_split, seed=spec.seed)
-        train_ds, eval_ds = parts["train"], parts["test"]
-    else:
-        train_ds, eval_ds = ds, None
+    # cairn-extensions#4: train on `train_uri` when set (else `dataset_uri`), evaluate on a
+    # governed `eval_uri` when set (else a seeded hold-out); `test_uri` is never opened here.
+    from operator_training import splits  # noqa: PLC0415 - stdlib helper
+
+    def _bounded(d):
+        # keep it small + bounded for CPU/MPS — enough rows to cover the step budget.
+        return d.select(range(min(len(d), max(16, steps * 8))))
+
+    train_ds, eval_ds, _eval_source = splits.train_and_eval(
+        spec, lambda uri: _load(uri).map(_to_text_fn(tok)), seed=spec.seed,
+        can_split=lambda d: len(d) > 4, prepare_train=_bounded)
+    _batch = splits.batch_args(spec, per_device=1, accumulation=1)
 
     # Trackers (mlflow/wandb) — honor the spec so a validation run streams real
     # metrics to MLflow over its duration (creds bridged by #532). Empty (the
@@ -254,7 +263,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     cfg = dict(
         output_dir=out_dir, seed=spec.seed, max_steps=steps,
         learning_rate=spec.learning_rate,
-        per_device_train_batch_size=1, gradient_accumulation_steps=1,
+        **_batch,
         logging_steps=1, report_to=report_to,
         use_cpu=(device == "cpu"),
         packing=spec.packing,
@@ -263,6 +272,8 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     )
     if "dataset_text_field" in params:
         cfg["dataset_text_field"] = "text"
+    if spec.gradient_checkpointing is not None:
+        cfg["gradient_checkpointing"] = bool(spec.gradient_checkpointing)
     for k in ("max_seq_length", "max_length"):  # trl renamed this across versions
         if k in params:
             cfg[k] = 128 if validating else min(spec.max_seq_len, 512)
@@ -350,6 +361,7 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
     tok.save_pretrained(out_dir)
 
     metrics = _base_metrics(stats, device, steps)
+    metrics.update(splits.recorded(spec, _batch, _eval_source))
     if tracking_error:
         metrics["tracking_error"] = tracking_error  # soft, like publish_error (#1709)
     if validating:
@@ -362,6 +374,9 @@ async def _train_local(spec: TrainSpec, *, progress_path: str | None = None,
             metrics["eval_loss"] = float(trainer.evaluate().get("eval_loss", 0.0))
         except Exception as e:  # noqa: BLE001
             metrics["eval_error"] = str(e)[:200]
+    # cairn-extensions#7 — the base model on the same rows: the adapter switched off, after training
+    metrics.update(splits.baseline(
+        spec, lambda: splits.evaluate_with_adapter_disabled(trainer.model, trainer), has_eval=eval_ds is not None))
     # ADR-0064 §2: surface the durable checkpoint location (if any checkpoint was
     # written AND a checkpoint bucket is configured) so the control loop can
     # relaunch a dead job onto it. Best-effort — never fails the train.
@@ -384,7 +399,11 @@ class LocalTrainOp(Operation[TrainSpec, TrainResult]):
     reports = TRAIN_REPORTS  # ADR-0103 / #2025
 
     async def run(self, inp: TrainSpec, ctx: OperationContext) -> TrainResult:
-        return await _train_local(inp, reporter=ctx.report)
+        # A flow stage's context carries the job's workdir (flow_stages._Ctx): the trainer
+        # writes under it, so its checkpoints live and die with the job. No workdir (the
+        # in-process operator) = /tmp/<output_name>, as before.
+        out_dir = checkpoint_sync.trainer_output_dir(inp.output_name, getattr(ctx, "workdir", None))
+        return await _train_local(inp, reporter=ctx.report, output_dir=out_dir)
 
     def mock(self, inp: TrainSpec, ctx: OperationContext) -> TrainResult:
         return TrainResult(

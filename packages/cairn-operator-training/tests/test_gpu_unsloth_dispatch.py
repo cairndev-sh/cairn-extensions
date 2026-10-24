@@ -7,6 +7,7 @@ result with the LOCAL adapter dir so the SSH governed path can SFTP-fetch it.
 from __future__ import annotations
 
 import asyncio
+import sys
 
 from operator_training.operators import local
 from operator_training.schemas.train import TrainSpec
@@ -16,8 +17,10 @@ def _spec(**kw):
     return TrainSpec(dataset_uri="ds", method="qlora", output_name="out", **kw)
 
 
-def test_no_torch_or_no_cuda_takes_cpu_path():
-    # In CI torch isn't installed → the cuda probe raises → CPU path (never GPU).
+def test_no_torch_or_no_cuda_takes_cpu_path(monkeypatch):
+    # No torch → the cuda probe raises → CPU path (never GPU). `None` in sys.modules makes
+    # `import torch` raise, so the test holds on a CUDA box too.
+    monkeypatch.setitem(sys.modules, "torch", None)
     assert local._use_gpu_unsloth(_spec()) is False
 
 
@@ -34,8 +37,9 @@ def test_gpu_dispatch_wraps_unsloth_result(monkeypatch):
 
     called = {}
 
-    def fake_main(spec_dict, reporter=None):
+    def fake_main(spec_dict, reporter=None, *, output_dir=None):
         called["spec"] = spec_dict
+        called["output_dir"] = output_dir
         return {"adapter_uri": "hf://acme/out", "metrics": {"train_loss": 0.7, "eval_loss": 0.9}}
 
     import operator_training.train_entry as te
@@ -48,6 +52,6 @@ def test_gpu_dispatch_wraps_unsloth_result(monkeypatch):
     # …metrics threaded through, backend tagged unsloth-gpu.
     assert res.backend == "unsloth-gpu"
     assert res.metrics["eval_loss"] == 0.9
-    # adapter_uri forced to the LOCAL dir train_entry writes (so SFTP-fetch works),
-    # NOT the hf:// push target.
-    assert res.adapter_uri == "/tmp/out"
+    # adapter_uri forced to the LOCAL dir train_entry writes (the caller publishes it),
+    # NOT the hf:// push target. No job workdir here, so /tmp/<output_name>.
+    assert res.adapter_uri == called["output_dir"] == "/tmp/out"

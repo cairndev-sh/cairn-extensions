@@ -108,6 +108,27 @@ builtin `train_local`'s smaller contract).
 
 ### Stage contracts on the `sft-train` kernels (#158, ADR-0118)
 
+**`train.qlora` implements `training.stage.train_qlora/1.1.0`** (cairn-extensions#4). Its configuration adds the
+governed splits and the trainer knobs, and drops `extra`:
+
+| Key | Default | What it does |
+|---|---|---|
+| `train_uri` | `""` | the training data (a registered train version); `dataset_uri` mirrors it when absent |
+| `eval_uri` | `""` | the evaluation data; when set, `eval_split` is not used |
+| `test_uri` | `""` | recorded on the result as `test_uri`; the trainer never opens it |
+| `per_device_batch_size` | `0` | rows per device per step; 0 keeps the trainer's default (8 on the GPU path, 1 on CPU/MPS) |
+| `gradient_accumulation_steps` | `0` | 0 keeps the default (1) |
+| `gradient_checkpointing` | `null` | null keeps the default (Unsloth's on the GPU path) |
+| `lora_dropout` | `null` | null keeps the default (0 on the GPU path, 0.05 on CPU/MPS) |
+| `baseline_eval` | `false` | 1.2.0 (cairn-extensions#7): report `baseline_eval_loss`, the base model's loss on the evaluation data — measured after training with the adapter disabled (PEFT `disable_adapter`), on the same rows and trainer as `eval_loss`. Evaluating before `train()` broke the fp16 path on a T4. `baseline_skipped` names why when there is none |
+
+Both trainers read them through `splits.py`, and record `effective_batch_size`, `eval_source` (`eval_uri`,
+`eval_split` or `none`) and `test_uri` on the result. A fidelity subsample replaces `train_uri` when the split is
+governed. The 1.0.0 files are unchanged; the output stays `training.stage.train_qlora.output/1.0.0`. Not in 1.1.0:
+`completion_only_loss` — the rows are rendered into one `text` column, which TRL's completion-only masking does not
+apply to, and Unsloth's response-only masking needs a GPU run to verify. The docx recipe's values (alpha 32,
+seed 3407) are the pack preset's, not these defaults.
+
 `sample.fidelity`, `train.qlora`, `eval.checkpoints` and `package.adapter` implement
 `contract://training.stage.<kernel>/1.0.0` (`cairn-contracts-training-stages`), declared as `implements` beside
 `risk_class` in `flow_stages.py`: the configuration is CLOSED (for `train.qlora` it is `TrainSpec`'s fields plus
@@ -193,4 +214,5 @@ pack — install it before trusting them.
 | 2026-10-15 | #1458: the SFT trainer maps chat, alpaca, `input`/`output` and `prompt`/`completion` rows with the data plane's turn rules, refuses an empty turn or an unsupported shape with the row number, and does so before the model loads (it trained chat corpora on empty strings) | #1458 |
 | 2026-10-16 | #2643: `train.distill` — `compress/distill` pipelines reach the GKD trainer through the `distill` ml flow (GPU target), not a `task:` leg that ran it in the control plane; the operator and the kernel share one `distill_body` | #2643 |
 | 2026-10-21 | Moved public to `cairndev-sh/cairn-extensions` with its two contract wheels: `train/proxy-trial` and its Optuna ranking stay with the platform; `sample.fidelity` imports `cairn.core.dataflow.fidelity` (cairndev 0.2.0); the `[gpu]` extra is the exact trainer pin set; `[compat]` and the `cairndev` pin are bounded to `>=0.2.0,<0.3`. |
+| 2026-10-22 | #4: `train.qlora` implements `training.stage.train_qlora/1.1.0` (governed train/eval/test splits; batch, accumulation, checkpointing and dropout knobs; `extra` out of the configuration); `splits.py` shared by both trainers; `cairn-contracts-training-stages` 1.1.0. |
 | 2026-10-21 | One trainer, no provider clients: `train/modal`, `train/kaggle`, `train/runpod`, `train/vast`, `train/stage-dataset`, `train/teardown`, `managed_leg` and the published-image pin leave the public wheel; where a run goes is the engine's choice (ssh today). The `modal` and `kaggle` extras go with them. |

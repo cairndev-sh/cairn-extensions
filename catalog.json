@@ -101,6 +101,20 @@
         "index": "pypi",
         "name": "cairn-pack-dataset-prep"
       }
+    },
+    {
+      "ref": "finetune",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person.",
+      "kind": "domain_pack",
+      "pipelines": [
+        "sft"
+      ],
+      "install": {
+        "index": "pypi",
+        "name": "cairn-pack-finetune"
+      }
     }
   ]
 }
