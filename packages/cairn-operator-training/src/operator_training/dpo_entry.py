@@ -62,6 +62,10 @@ def main(spec: dict[str, Any]) -> dict[str, Any]:
     # pin, fetch s3:// via boto3, then load.
     ds = load_dataset("json", data_files=dataset_fetch.resolve_dataset_uri(
         str(spec["dataset_uri"])), split="train")
+    # cairn-extensions#7 — the same default as the SFT entry for a base model's tokenizer
+    from operator_training.chat_template import ensure_chat_template  # noqa: PLC0415 - stdlib helper
+    ensure_chat_template(tokenizer)
+
     def _render(r: dict[str, Any]) -> dict[str, Any]:
         prompt = tokenizer.apply_chat_template(
             [{"role": "user", "content": r["prompt"]}],

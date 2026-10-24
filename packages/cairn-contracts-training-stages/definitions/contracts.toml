@@ -2,7 +2,7 @@ format = "cairn.contracts/1"
 
 [distribution]
 name = "cairn-contracts-training-stages"
-version = "1.1.0"
+version = "1.2.0"
 
 [[definitions]]
 id = "training.stage.sample_fidelity"
@@ -89,3 +89,24 @@ id = "training.stage.train_qlora.configuration"
 revision = "1.1.0"
 kind = "schema"
 path = "schemas/training.stage.train_qlora.configuration.1.1.0.json"
+
+# cairn-extensions#7 — train.qlora 1.2.0: baseline_eval, the base model's evaluation loss, measured
+# after training with the adapter disabled (new configuration and output revisions). Every earlier
+# file is unchanged.
+[[definitions]]
+id = "training.stage.train_qlora"
+revision = "1.2.0"
+kind = "stage"
+path = "stages/training.stage.train_qlora.1.2.0.json"
+
+[[definitions]]
+id = "training.stage.train_qlora.configuration"
+revision = "1.2.0"
+kind = "schema"
+path = "schemas/training.stage.train_qlora.configuration.1.2.0.json"
+
+[[definitions]]
+id = "training.stage.train_qlora.output"
+revision = "1.2.0"
+kind = "schema"
+path = "schemas/training.stage.train_qlora.output.1.2.0.json"

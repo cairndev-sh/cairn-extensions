@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.profile_fields.configuration/1.0.0",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Label fields whose top values and counts are reported."
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Grouping fields reported by size only, never by value."
+    },
+    "top": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 20
+    },
+    "value_chars": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 64
+    }
+  },
+  "additionalProperties": false
+}

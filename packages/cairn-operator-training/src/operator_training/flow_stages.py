@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from operator_training import dataset_fetch, live
-from operator_training.publish import publish_adapter_dir
+from operator_training.publish import adapter_files, publish_adapter_dir
 
 
 class _Ctx:
@@ -38,13 +38,16 @@ class _Ctx:
     the dataset_checks kernels): kernels run engine-side with no graph.
     ``report`` (#2025) is the stage's :class:`~operator_training.live.LiveReporter`,
     built from the env the flow engine handed this process — the same surface
-    the operator bodies call as ``ctx.report``."""
+    the operator bodies call as ``ctx.report``. ``workdir`` is the job's working
+    directory, where ``train/local`` writes the trainer's output
+    (``checkpoint_sync.trainer_output_dir``)."""
     pipeline_id = "ml-flow-stage"
     node_name = "kernel"
     compute = None
 
-    def __init__(self, report: Any = None) -> None:
+    def __init__(self, report: Any = None, workdir: Path | None = None) -> None:
         self.report = report if report is not None else live.NullReporter()
+        self.workdir = workdir
 
 
 _RESULT_FILE = "train_result.json"
@@ -53,6 +56,24 @@ _RESULT_FILE = "train_result.json"
 # before the kernel OOM-killed it 45 minutes in. ~7 bytes/param covers
 # weights + LoRA grads/optimizer + activations for the CPU path.
 _TRAIN_BYTES_PER_PARAM = 7.0
+# cairn-extensions#7 — on a CUDA box the trainer is the Unsloth GPU path: the weights live in
+# VRAM, and host RAM holds the process, the tokenizer and the data. Measured on a g4dn.xlarge
+# (T4, 15 GiB RAM): Qwen3-4B-Base 4-bit QLoRA peaked at 2.3 GiB RSS over a full epoch (0.58
+# B/param), where the CPU rate refused it for an estimated 26.1 GiB. 1.0 B/param keeps ~70 %
+# headroom over that measurement.
+_GPU_TRAIN_BYTES_PER_PARAM = 1.0
+
+
+def _host_bytes_per_param(config: dict) -> float:
+    """The host-RAM rate for the path this train will take: the GPU path when a CUDA device is
+    there and the run is not a CPU validation (the same routing ``LocalTrainOp`` applies)."""
+    if config.get("validate_pipeline") or os.environ.get("CAIRN_TRAIN_VALIDATE"):
+        return _TRAIN_BYTES_PER_PARAM
+    try:
+        import torch  # noqa: PLC0415 - a cheap cuda probe; absent on a CPU-only control plane
+        return _GPU_TRAIN_BYTES_PER_PARAM if torch.cuda.is_available() else _TRAIN_BYTES_PER_PARAM
+    except Exception:  # noqa: BLE001 — no torch / probe failure ⇒ the CPU path's rate
+        return _TRAIN_BYTES_PER_PARAM
 
 
 def _param_count_from_name(base_model: str) -> float | None:
@@ -86,12 +107,14 @@ def _refuse_if_ram_infeasible(base_model: str, config: dict) -> None:
     avail = _available_ram_bytes()
     if params is None or avail is None:
         return
-    need = params * _TRAIN_BYTES_PER_PARAM
+    rate = _host_bytes_per_param(config)
+    need = params * rate
     if need > avail:
+        path = "GPU path" if rate == _GPU_TRAIN_BYTES_PER_PARAM else "CPU path, calibrated on the live #1322 OOM"
         raise RuntimeError(
             f"train.qlora refused before starting: {base_model} needs an "
-            f"estimated {need / 2**30:.1f} GiB RSS (~{_TRAIN_BYTES_PER_PARAM:.0f} B/param, "
-            f"calibrated on the live #1322 OOM) but only {avail / 2**30:.1f} GiB is "
+            f"estimated {need / 2**30:.1f} GiB RSS (~{rate:.1f} B/param, {path}) "
+            f"but only {avail / 2**30:.1f} GiB is "
             f"free — the kernel OOM-killer would end this run mid-train. "
             f"Use a smaller base model / bigger box, or set ignore_ram_check: true "
             f"to proceed anyway (swap may absorb it, slowly).")
@@ -239,7 +262,7 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
         op = LocalTrainOp()
     reporter = live.reporter_from_env(node="train.qlora")  # #2025: the live curve, as this stage
     try:
-        res = asyncio.run(op.run(spec, _Ctx(reporter)))
+        res = asyncio.run(op.run(spec, _Ctx(reporter, workdir=workdir)))
     finally:
         reporter.close()
     if res.status != "succeeded":
@@ -290,6 +313,11 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
         "steps": metrics.get("steps"),
         "base_model": spec.base_model,
         "method": spec.method,
+        # cairn-extensions#7 — present only with baseline_eval (the value, or why it was skipped).
+        **{k: metrics[k] for k in ("baseline_eval_loss", "baseline_skipped") if k in metrics},
+        # #1709 soft failure, as train.distill: a tracker that was asked for and dropped (the client
+        # missing, or the server unreachable) is on the record, not only in the trainer's log
+        **({"tracking_error": str(metrics["tracking_error"])} if metrics.get("tracking_error") else {}),
     }
 
 
@@ -336,6 +364,13 @@ def eval_checkpoints(workdir: Path, config: dict, inputs: list[str]) -> dict:
 #: checkpoints, tokenizer copies and manifests are not identity (#2189).
 _CANDIDATE_FILES = ("adapter_config.json", "config.json")
 _CANDIDATE_SUFFIXES = (".safetensors", ".bin")
+#: A ``.bin`` the trainer writes beside the weights that is not the model: the pickled
+#: TrainingArguments (it names the output dir, so it differs per job for the same weights).
+_NOT_CANDIDATE = ("training_args.bin",)
+
+
+def _is_candidate_file(name: str) -> bool:
+    return name not in _NOT_CANDIDATE and (name in _CANDIDATE_FILES or Path(name).suffix in _CANDIDATE_SUFFIXES)
 _STUB_KNOBS = ("base_model", "method", "lora_r", "lora_alpha", "learning_rate", "epochs",
                "max_steps", "seed", "target_modules", "max_seq_len", "output_name")
 
@@ -367,11 +402,15 @@ def hash_candidate_dir(path: Path) -> "tuple[str, int] | None":
     """Content identity of an adapter/model directory: sha256 over the sorted
     candidate files (relative name + bytes). ``None`` when nothing hashable is
     there — a remote-only URI has no bytes here, and that is reported, never
-    faked. Hash the safetensors, not the logs (#2189 risk note)."""
+    faked. Hash the safetensors, not the logs (#2189 risk note).
+
+    The files come from :func:`operator_training.publish.adapter_files`, the set the publish
+    uploads (the top of the directory), so every hashed byte is a published byte: a
+    ``checkpoint-*/`` dir (or an ``adapter/`` dir a retry's S3 pull drops in) is never part
+    of the identity, whatever ``save_total_limit`` kept."""
     if not path.is_dir():
         return None
-    files = sorted(p for p in path.rglob("*")
-                   if p.is_file() and (p.name in _CANDIDATE_FILES or p.suffix in _CANDIDATE_SUFFIXES))
+    files = [path / n for n in adapter_files(str(path)) if _is_candidate_file(n)]
     if not files:
         return None
     h = hashlib.sha256()
@@ -439,9 +478,10 @@ def package_adapter(workdir: Path, config: dict, inputs: list[str]) -> dict:
 # kernels in this module (train.distill, dataset.dpo_pairs, …) stay legacy until their slices.
 for _fn in (sample_fidelity, eval_checkpoints, package_adapter):
     _fn.implements = (f"contract://training.stage.{_fn.__name__}/1.0.0",)
-# cairn-extensions#4 — train.qlora implements 1.1.0: the governed splits (train/eval/test URIs)
-# and the batch, accumulation, checkpointing and dropout knobs; `extra` is not configuration.
-train_qlora.implements = ("contract://training.stage.train_qlora/1.1.0",)
+# cairn-extensions#4 / #7 — train.qlora implements 1.2.0: the governed splits (train/eval/test URIs)
+# and the batch, accumulation, checkpointing and dropout knobs (1.1.0; `extra` is not
+# configuration), and baseline_eval, the base model's eval loss with the adapter disabled (1.2.0).
+train_qlora.implements = ("contract://training.stage.train_qlora/1.2.0",)
 
 
 _ABSTAIN = "I don't know."

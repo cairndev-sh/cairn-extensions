@@ -99,6 +99,8 @@ class StubTrainOp(Operation[TrainSpec, TrainResult]):
                 "method": inp.method,
                 "base_model": inp.base_model,
                 "stub": True,
+                # cairn-extensions#7 — the curve's first point stands in for the base model.
+                **({"baseline_eval_loss": curve[0] if curve else 0.0} if inp.baseline_eval else {}),
             },
         )
 

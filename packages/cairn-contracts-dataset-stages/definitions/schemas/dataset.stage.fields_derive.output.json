@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.fields_derive.output/1.0.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The fields written; each also reports <field>_matched."
+    }
+  },
+  "required": [
+    "rows",
+    "fields"
+  ]
+}

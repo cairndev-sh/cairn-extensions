@@ -4,8 +4,8 @@ The remote worker receives a ``dataset_uri`` that may be an ``s3://`` object (a
 prepared dataset a pipeline exported, #701), a ``file://`` URI, a bare
 Hugging Face Hub id, an ``http(s)://`` URL, or a plain local path. HF ``datasets``
 cannot read ``s3://`` without ``s3fs`` (not a dependency here), so we fetch
-``s3://`` down via boto3 (a base dep of this pack, shared client with
-``checkpoint_sync`` so the MinIO/R2 endpoint resolves identically) and hand the
+``s3://`` down via boto3 (the ``[gpu]`` extra, imported only for an ``s3://`` URI;
+the client is ``checkpoint_sync``'s, so the MinIO/R2 endpoint resolves identically) and hand the
 trainer a local file. Everything else is passed through untouched for
 ``datasets`` to resolve.
 """

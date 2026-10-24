@@ -9,17 +9,19 @@ pattern as the tracking creds, #532): ``CAIRN_CHECKPOINT_BUCKET``,
 ``AWS_*`` creds/region and an optional ``AWS_ENDPOINT_URL`` (MinIO/R2). Absent a
 bucket, every helper here is a no-op — today's local-only behavior, unchanged.
 
-boto3 is a base dependency (not optional) for this pack, so it's imported at
-module top; torch/transformers/trl stay lazy (the ``[local]`` extra) per the
-existing convention in ``operators/local.py``.
+boto3 is imported only when an S3 client is built (:func:`s3_client`): it is not a
+base dependency of this pack. The ``[gpu]`` extra carries it, because the GPU box
+is where ``s3://`` data, checkpoint mirroring and the ``s3`` adapter target run;
+a run with none of those never imports it. torch/transformers/trl stay lazy too
+(the ``[local]``/``[gpu]`` extras), per the convention in ``operators/local.py``.
+
+:func:`trainer_output_dir` is where a trainer writes its checkpoints and adapter.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-
-import boto3
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +71,39 @@ def s3_target_from_env(output_name: str = "") -> tuple[str, str, str] | None:
     return bucket, prefix, run_key
 
 
+#: The directory a stage's trainer writes under, inside the job's workdir.
+TRAIN_OUTPUT_DIR = "train-output"
+
+
+def trainer_output_dir(output_name: str, workdir: str | os.PathLike | None = None) -> str:
+    """Where a trainer writes its ``checkpoint-*`` dirs and the saved adapter.
+
+    With the job's ``workdir`` (a flow stage always has one): ``<workdir>/train-output/
+    <output_name>``. It lives and dies with the job, so two runs that share an
+    ``output_name`` on one box never see each other's checkpoints; a retry of the
+    same run resumes from its own S3 checkpoints (:func:`pull_checkpoints_if_any`,
+    keyed by the run, not the directory). Without one (a trainer driven directly,
+    e.g. the image's ``train_entry`` entrypoint): ``/tmp/<output_name>``, as before."""
+    name = (output_name or "").strip() or GENERIC_RUN_KEY
+    if workdir:
+        return os.path.join(os.fspath(workdir), TRAIN_OUTPUT_DIR, name)
+    return f"/tmp/{name}"
+
+
 def s3_client():
     """A boto3 S3 client honoring ``AWS_ENDPOINT_URL``/``AWS_DEFAULT_REGION`` (set
     by the operator env injection), for MinIO/R2-compatible stores too. Public so
-    the dataset fetcher (#701) resolves the same endpoint/region as checkpoints."""
+    the dataset fetcher (#701) resolves the same endpoint/region as checkpoints.
+
+    boto3 is imported here, not at module top: a run that touches no S3 needs no
+    boto3 (see the module docstring)."""
+    try:
+        import boto3  # noqa: PLC0415 - optional: only the S3 paths need it
+    except ImportError as e:
+        raise RuntimeError(
+            "this run reads or writes S3 (an s3:// dataset, CAIRN_CHECKPOINT_BUCKET or "
+            "artifact_target: s3) and boto3 is not installed: pip install "
+            "'cairn-operator-training[gpu]' (or pip install boto3)") from e
     endpoint = os.environ.get("AWS_ENDPOINT_URL") or None
     region = os.environ.get("AWS_DEFAULT_REGION") or None
     return boto3.client("s3", endpoint_url=endpoint, region_name=region)
@@ -99,6 +130,18 @@ def upload_dir(local_dir: str, bucket: str, key_prefix: str) -> None:
                 client.upload_file(full, bucket, key)
     except Exception:  # noqa: BLE001 - checkpoint sync is best-effort
         logger.warning("checkpoint_sync.upload_dir failed for %s", local_dir, exc_info=True)
+
+
+def upload_files(local_dir: str, names: list[str], bucket: str, key_prefix: str) -> None:
+    """Upload the named files of ``local_dir`` (top level only) to
+    ``s3://bucket/key_prefix/<name>``. Best-effort, like :func:`upload_dir`."""
+    try:
+        client = _client()
+        prefix = key_prefix.strip("/")
+        for name in names:
+            client.upload_file(os.path.join(local_dir, name), bucket, f"{prefix}/{name}")
+    except Exception:  # noqa: BLE001 - best-effort; the publish verifies what landed
+        logger.warning("checkpoint_sync.upload_files failed for %s", local_dir, exc_info=True)
 
 
 def download_prefix(bucket: str, key_prefix: str, local_dir: str) -> None:
