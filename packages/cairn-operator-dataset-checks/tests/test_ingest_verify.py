@@ -48,10 +48,10 @@ def test_export_echoes_register_request(tmp_path: Path, monkeypatch):
     assert out["register_as"] == "facts-train"
     out2 = D.export_jsonl(tmp_path, {"name": "x.jsonl", "store": "s3"}, [])
     assert "register_as" not in out2
-    # the LOCAL store branch must echo it too — it silently dropped the request
-    # until the first live governed import (caught 2026-08-20)
-    out3 = D.export_jsonl(tmp_path, {"name": "x.jsonl", "store": "local", "register": "facts-train"}, [])
-    assert out3["register_as"] == "facts-train" and out3["store"] == "local"
+    # the LOCAL store refuses the request (it once dropped it silently, caught 2026-08-20; since
+    # cairn-extensions#6 a local export is never registered: test_export_s3.py)
+    with pytest.raises(ValueError, match="`register` needs `store: s3`"):
+        D.export_jsonl(tmp_path, {"name": "x.jsonl", "store": "local", "register": "facts-train"}, [])
 
 
 def test_malformed_lines_and_an_empty_export_reach_the_intake_verdict_as_invalid_format(tmp_path: Path):

@@ -73,3 +73,38 @@ def test_export_s3_fails_loud_without_bucket(tmp_path: Path, monkeypatch):
     wd = _wd(tmp_path, "nb")
     with pytest.raises(RuntimeError, match="CAIRN_ARTIFACT_S3_BUCKET"):
         S.export_jsonl(wd, {"store": "s3"}, [])
+
+
+# ── cairn-extensions#6: `register` needs the s3 store ───────────────────────
+
+@pytest.mark.parametrize("store, env", [("local", "s3"), ("", "local"), ("", "")])
+def test_register_on_the_local_store_is_refused_before_anything_is_written(tmp_path: Path, monkeypatch, store, env):
+    """A version registered from a local export would name a file in the leg's temporary workdir.
+    Refused whether the stage asks for `local` or the environment's store is local (or unset),
+    and before the export file is written."""
+    for name in ("OBS_PROFILE", "CAIRN_PROFILE", "OBS_ARTIFACT_STORE"):
+        monkeypatch.delenv(name, raising=False)
+    if env:
+        monkeypatch.setenv("CAIRN_ARTIFACT_STORE", env)
+    else:
+        monkeypatch.delenv("CAIRN_ARTIFACT_STORE", raising=False)
+    wd = _wd(tmp_path, "reg")
+    before = sorted(p.name for p in wd.iterdir())
+    config = {"name": "x.jsonl", "register": "facts", **({"store": store} if store else {})}
+    with pytest.raises(ValueError, match=r"export.jsonl: `register` needs `store: s3`.*CAIRN_ARTIFACT_S3_BUCKET") as refused:
+        S.export_jsonl(wd, config, [])
+    assert str(wd) in str(refused.value)
+    assert sorted(p.name for p in wd.iterdir()) == before  # nothing written
+
+
+@pytest.mark.parametrize("config, env", [({"store": "s3"}, "local"), ({}, "s3")])
+def test_register_on_s3_uploads_and_asks_for_the_version(tmp_path: Path, s3env, monkeypatch, config, env):
+    for name in ("OBS_PROFILE", "CAIRN_PROFILE", "OBS_ARTIFACT_STORE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CAIRN_ARTIFACT_STORE", env)
+    wd = _wd(tmp_path, "s3reg")
+    r = S.export_jsonl(wd, {"name": "x.jsonl", "register": "facts", **config}, [])
+    assert r["store"] == "s3" and r["register_as"] == "facts"
+    key = f"campaign/dataflow/{wd.name}/x.jsonl"
+    body = boto3.client("s3").get_object(Bucket="cairn-test-artifacts", Key=key)["Body"].read()
+    assert r["output"] == f"s3://cairn-test-artifacts/{key}" and body == S._current(wd).read_bytes()
