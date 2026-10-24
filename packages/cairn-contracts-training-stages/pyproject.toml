@@ -4,7 +4,7 @@
 # metadata. The root installs it NON-editable (`{ workspace = true, editable = false }`).
 [project]
 name = "cairn-contracts-training-stages"
-version = "1.0.0"
+version = "1.1.0"
 description = "Shared stage contracts for the training domain's ml-flow kernels (sample.fidelity, train.qlora, eval.checkpoints, package.adapter)."
 readme = "README.md"
 requires-python = ">=3.12"

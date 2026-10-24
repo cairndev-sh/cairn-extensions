@@ -2,7 +2,7 @@ format = "cairn.contracts/1"
 
 [distribution]
 name = "cairn-contracts-training-stages"
-version = "1.0.0"
+version = "1.1.0"
 
 [[definitions]]
 id = "training.stage.sample_fidelity"
@@ -75,3 +75,17 @@ id = "training.stage.package_adapter.output"
 revision = "1.0.0"
 kind = "schema"
 path = "schemas/training.stage.package_adapter.output.json"
+
+# cairn-extensions#4 — the governed splits and the trainer knobs: a new stage revision and
+# configuration schema; the output is unchanged (1.0.0), and the 1.0.0 files above never change.
+[[definitions]]
+id = "training.stage.train_qlora"
+revision = "1.1.0"
+kind = "stage"
+path = "stages/training.stage.train_qlora.1.1.0.json"
+
+[[definitions]]
+id = "training.stage.train_qlora.configuration"
+revision = "1.1.0"
+kind = "schema"
+path = "schemas/training.stage.train_qlora.configuration.1.1.0.json"

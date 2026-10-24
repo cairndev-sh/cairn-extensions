@@ -7,6 +7,7 @@ result with the LOCAL adapter dir so the SSH governed path can SFTP-fetch it.
 from __future__ import annotations
 
 import asyncio
+import sys
 
 from operator_training.operators import local
 from operator_training.schemas.train import TrainSpec
@@ -16,8 +17,10 @@ def _spec(**kw):
     return TrainSpec(dataset_uri="ds", method="qlora", output_name="out", **kw)
 
 
-def test_no_torch_or_no_cuda_takes_cpu_path():
-    # In CI torch isn't installed → the cuda probe raises → CPU path (never GPU).
+def test_no_torch_or_no_cuda_takes_cpu_path(monkeypatch):
+    # No torch → the cuda probe raises → CPU path (never GPU). `None` in sys.modules makes
+    # `import torch` raise, so the test holds on a CUDA box too.
+    monkeypatch.setitem(sys.modules, "torch", None)
     assert local._use_gpu_unsloth(_spec()) is False
 
 

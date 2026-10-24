@@ -13,13 +13,23 @@ proven (clouds, Kubernetes, RunPod, Vast).
   `dataset.dpo_pairs`, `train.distill`.
 - **`compress/distill`:** knowledge distillation (TRL's GKD trainer).
 - **Contracts:** implements `train.run` (`cairn-contracts-training`) and the four
-  `training.stage.*` stage contracts (`cairn-contracts-training-stages`).
+  `training.stage.*` stage contracts (`cairn-contracts-training-stages`); `train.qlora` implements
+  `training.stage.train_qlora/1.1.0`, which takes governed `train_uri` / `eval_uri` / `test_uri`
+  splits and the batch, accumulation, checkpointing and dropout knobs.
 
 ## Install
 
+This wheel and the contract wheels it pins are not on PyPI yet. Until they are, install from a
+checkout of this repository, into the environment `cairndev` 0.2.x runs in:
+
 ```bash
-pip install cairn-operator-training          # the control plane: no torch, no CUDA
-pip install 'cairn-operator-training[gpu]'   # a CUDA box the ssh engine runs the trainer on
+git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
+# the control plane: no torch, no CUDA
+pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
+  ./packages/cairn-operator-training
+# a CUDA box the ssh engine runs the trainer on
+pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
+  './packages/cairn-operator-training[gpu]'
 ```
 
 | Extra | What it is for |
@@ -48,5 +58,11 @@ each row will name the `cairndev` release it was proven on as it is re-run.
 Where a run goes is the engine's: an ssh GPU box (`cairn connect add ssh`, profile
 `ml_engine = "builtin"`, `ml_target = "<connection>"`) is the proven path; the box installs
 `cairn-operator-training[gpu]`. Design notes: [`DESIGN.md`](DESIGN.md).
+
+**With sign-in on (cairn 0.2.0 and later).** A connection bound as the profile's `ml_target`
+belongs to the deployment (the `default` account), and a team account's flow legs cannot use it.
+A team account creates its own `compute.ssh` connection under its own name (connection names are
+unique across a deployment) and names it as the target in its pipelines or flows. Credentials this wheel reads from the environment (`HF_TOKEN`, `WANDB_*`, `AWS_*`) are not
+declared as `secrets:`; see [`DESIGN.md`](DESIGN.md) §4.
 
 Apache-2.0 — see [`LICENSE`](LICENSE).
