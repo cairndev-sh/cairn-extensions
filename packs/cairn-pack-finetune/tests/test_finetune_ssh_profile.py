@@ -79,6 +79,45 @@ def test_the_ssh_engine_accepts_the_sft_train_flow(monkeypatch):
         registry.clear()
 
 
+@pytest.mark.parametrize("extra,refused", [("", None), (",AWS_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY")])
+def test_the_commented_remote_env_line_is_one_the_ssh_engine_accepts(tmp_path, monkeypatch, extra, refused):
+    """cairndev 0.3.0 and later (#193): uncommented, the profile's `remote_env` line selects the three
+    names, and the SSH engine accepts the `sft-train` flow with it; a credential name is refused (the
+    control). Skipped on a core that has no `remote_env` (0.2.x), where the line must stay commented."""
+    from cairn.core.backend_selection import selected
+    from cairn.core.dataflow import Budget, DataflowSpec
+    from cairn.core.dataflow.defs import resolve_flow_ref
+    from cairn.core.dataflow.engine_registry import resolve_engine
+    from cairn.core.pack import registry
+    from cairn.core.pack.loader import load_all_packs
+    from cairn.core.profile_backends import BACKENDS
+
+    if "remote_env" not in {f.key for f in BACKENDS}:
+        pytest.skip("this cairndev has no remote_env backend (cairndev 0.3.0 adds it)")
+    names = "CAIRN_CHECKPOINT_BUCKET,CAIRN_CHECKPOINT_PREFIX,AWS_DEFAULT_REGION"
+    text = PROFILE.read_text(encoding="utf-8")
+    line = f'# remote_env     = "{names}"'
+    assert line in text
+    uncommented = tmp_path / "finetune-ssh.toml"
+    uncommented.write_text(text.replace(line, f'remote_env       = "{names}{extra}"'), encoding="utf-8")
+    monkeypatch.setenv("CAIRN_PROFILE", str(uncommented))
+    monkeypatch.delenv("CAIRN_REMOTE_ENV", raising=False)
+    monkeypatch.setenv("CAIRN_PACK_PATH", str(PACK))
+    registry.clear()
+    load_all_packs()
+    try:
+        assert selected("remote_env") == names + extra
+        stages = resolve_flow_ref("finetune/sft-train", {"train_uri": "s3://b/train.jsonl",
+                                                         "base_model": "Qwen/Qwen3-4B-Base"}, kind="ml")
+        problems = resolve_engine(kind="ml").validate(DataflowSpec(stages=stages, budget=Budget()))
+    finally:
+        registry.clear()
+    if refused is None:
+        assert problems == []
+    else:
+        assert any("remote_env" in p and refused in p for p in problems), problems
+
+
 @pytest.mark.parametrize("needle", [
     "cairndev[ssh]",
     "cairn-operator-training[gpu]",
@@ -96,6 +135,12 @@ def test_the_ssh_engine_accepts_the_sft_train_flow(monkeypatch):
     "read access",
     "--secret PRIVATE_KEY=",
     "Venv mode only",
+    "remote_env",
+    "CAIRN_STORAGE",
+    "CAIRN_RUNTIME=dbos",
+    "CAIRN_RUNTIME=temporal",
+    "cairn ls finetune",
+    "From cairndev 0.3.0 both use",
 ])
 def test_the_header_names_what_a_deployment_must_set(needle):
     header = PROFILE.read_text(encoding="utf-8").split("[profile]")[0]

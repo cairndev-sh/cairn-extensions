@@ -17,11 +17,9 @@ The engine, the builtin operator packs and the core contracts live in
 |---|---|
 | `packages/cairn-operator-<name>/` | operator packs, one wheel each |
 | `packages/cairn-contracts-<name>/` | the domain contracts those packs implement (data only) |
+| `packs/cairn-pack-<name>/` | domain packs: pipelines, flows, profiles and presets, no code |
 | `scripts/` | the checks CI runs and the catalog generator |
 | `tests/` | the checks' own tests |
-
-Domain packs (`packs/cairn-pack-<name>/`: pipelines, flows, profiles and presets, no code) will
-live beside them; none is on `main` yet.
 
 ## Packages
 
@@ -30,11 +28,23 @@ live beside them; none is on `main` yet.
 | [`cairn-operator-dataset-checks`](packages/cairn-operator-dataset-checks/README.md) | dataset readiness checks, cleaning stages and splits | `cairn-contracts-dataset`, `cairn-contracts-dataset-stages` |
 | [`cairn-operator-training`](packages/cairn-operator-training/README.md) | SFT with LoRA / QLoRA, DPO and distillation | `cairn-contracts-training`, `cairn-contracts-training-stages` |
 
+| Domain pack | What | Stages from |
+|---|---|---|
+| [`cairn-pack-dataset-prep`](packs/cairn-pack-dataset-prep/README.md) | `dataset-prep/prepare`: pin a source, audit it, split it by group and register `train`, `val` and `test` versions with their roles | `cairn-operator-dataset-checks` |
+| [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, three approvals and a governed tag; the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training` |
+
 ## Install
 
-The operator packs require `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`). No package is on PyPI yet; until
-they are, install from a checkout, into the environment `cairndev` runs in, each operator pack
-together with the contract wheels it pins:
+Every package requires `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`; `>=0.2.1` for
+`cairn-operator-dataset-checks` and the domain packs). Once published, each installs by name:
+
+```bash
+pip install cairn-pack-dataset-prep cairn-pack-finetune   # the domain packs pull in their operator packs
+```
+
+The packages publish to PyPI soon (#10). Until then, install from a checkout, into the
+environment `cairndev` runs in, each operator pack together with the contract wheels it pins, and
+then the domain packs:
 
 ```bash
 git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
@@ -42,10 +52,13 @@ pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-datase
   ./packages/cairn-operator-dataset-checks
 pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
   ./packages/cairn-operator-training
+pip install ./packs/cairn-pack-dataset-prep ./packs/cairn-pack-finetune
 cairn doctor && cairn pack check
 ```
 
-Each package README lists its extras.
+Each package README lists its extras. [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md)
+walks through a governed fine-tune end to end: durability, the GPU box, preflight, a dry run on
+the stub trainer, the three approvals, and retries and cancel.
 
 The `install` entries in `catalog.json` name PyPI (`"index": "pypi"`). Each one becomes true
 when its distribution is first published; until then, use the checkout install above.
@@ -94,9 +107,10 @@ tests declares them in a `test` extra, which CI installs.
 
 ## Status
 
-Two operator packs and their four contract wheels are on `main`, tested in CI against the
-released `cairndev` 0.2.x. Their support tables (in each package README) say which paths have
-been re-proven on a public release. Domain packs and PyPI releases are next: see the issues.
+Two operator packs, their four contract wheels and two domain packs (`dataset-prep`,
+`finetune`) are on `main`, tested in CI against the released `cairndev` 0.2.x. Their support
+tables (in each README) say which paths have been re-proven on a public release. The first PyPI
+release is next (#10); the GPU qualification run of `finetune/sft` is #9.
 
 ## License
 

@@ -98,6 +98,13 @@ steps:
     depends_on: [approve-run]
     timeout: 30m
     with: &run
+      # #28 — an ml leg gets ONE attempt unless it declares more. Two: an attempt whose process
+      # was killed (a box reboot, the OOM killer, a dropped SSH session: no exit code, which the
+      # engine reports as retriable) runs once more, under the same run, and the trainer resumes
+      # from that run's checkpoints in CAIRN_CHECKPOINT_BUCKET. A leg that fails on its own error
+      # (a clean non-zero exit) is never retried. Each attempt reserves its own budget estimate;
+      # from cairndev 0.3.1 the launch estimate of a priced leg is hourly_usd × timeout × 2.
+      retry: {max_attempts: 2}
       train_uri: $input.train_version
       eval_uri: $input.val_version
       test_uri: $input.test_version
@@ -142,6 +149,7 @@ steps:
     timeout: 12h
     with:
       <<: *run
+      retry: {max_attempts: 2}   # as smoke's (#28), stated here because this is the 12-hour leg
       output_name: $input.output_name
       fidelity_rows: 0
       max_steps: $input.max_steps

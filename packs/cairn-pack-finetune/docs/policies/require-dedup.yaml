@@ -1,0 +1,23 @@
+# An EXAMPLE admission policy for `finetune/sft`, not active: the pack never loads it. To use it,
+# copy it into your policy directory (~/.cairn/policies, or $CAIRN_POLICIES_DIR) and check it with
+# `cairn validate <file>`.
+#
+# The holdout door needs no policy: on every launch it refuses training data that meets a
+# registered test or golden version (exact row hashes always, near duplicates with the
+# `[minhash]` extra). This policy asks for more evidence on the versions themselves: each one's
+# intake verdict must show that exact and near deduplication RAN. dataset-prep/prepare runs both,
+# but near dedup needs the `[minhash]` extra where prepare runs (`cairn-pack-dataset-prep[all]`):
+# without it the check is `degraded` and this policy refuses the launch.
+#
+# A check a policy names must be one the launch door knows (ingest, dedup_exact, dedup_near,
+# decontam, pii, expectations, profile_tokens, export). An unknown name refuses every launch, so
+# `required_checks: [holdout]` would stop all training. The decision is recorded on the pipeline
+# (`admission`, with `policy@<digest>`) and shown at the first gate.
+name: require-dedup
+description: A training launch's dataset versions must show that exact and near deduplication ran.
+applies_to:
+  action_types: []
+  environments: [production]   # a tier name applies to every named environment in it
+rules: []
+admission:
+  required_checks: [dedup_exact, dedup_near]
