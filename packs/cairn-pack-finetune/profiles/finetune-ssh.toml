@@ -29,15 +29,19 @@
 #   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after `train`
 #     and again, as a finalizer, on every outcome (`compute/release`). The connection must name an
 #     EC2 instance (`instance_id`, `region`; an Elastic IP keeps `host` stable across a stop), and
-#     the control plane needs boto3 (cairn-pack-dataset-prep brings it) and AWS credentials that
+#     the control plane needs boto3 (a dependency of cairn-pack-finetune) and AWS credentials that
 #     allow ec2:DescribeInstances, ec2:CreateTags, ec2:StartInstances and ec2:StopInstances on it.
-#     `sft`'s `compute_connection` input must be this profile's `ml_target` (`gpu`, its default).
+#     `sft`'s `compute_connection` input must be this profile's `ml_target` (`gpu`, its default);
+#     cairndev does not check that yet (cairndev-sh/cairn#216).
+#   * A box you start and stop yourself (any provider): launch `finetune/sft-own-box`, the same
+#     pipeline without the box steps; the connection then needs no `instance_id` or `region`.
 #   * `hourly_usd` prices the ml legs: the launch is refused before any record when a leg has no
 #     timeout or the worst case does not fit the budget; `approve-run` shows the estimate.
 #   * Durability: without CAIRN_STORAGE (SQLite or Postgres) runs live in memory and are lost on
 #     restart. CAIRN_RUNTIME=dbos ('cairndev[runtime-dbos]') resumes a run at the next boot. Not
 #     CAIRN_RUNTIME=temporal: `sft` has task legs (`acquire`, `promote`, the releases), which the
-#     Temporal owner does not run, and a finalizer; the launch is refused before any record.
+#     Temporal owner does not run, and a finalizer (`sft-own-box` has `promote`); the launch is
+#     refused before any record.
 #   * Venv mode only: there is no published trainer image with this pack's trainer yet, so this
 #     profile pins `remote_exec_mode = "venv"` (the box's own virtualenv, not a container).
 #   * `cairn-dataflow-run` must be on the box's non-interactive SSH PATH; otherwise set
@@ -65,10 +69,9 @@
 #
 # Two machines need a store both can reach, so this profile selects the s3 artifact store: the
 # versions dataset-prep registers (it refuses to register from the local store) and the adapter
-# (`artifact_target: s3`) cross through it. `sft` starts and stops the box it trains on, so it
-# does not run on one machine as it is: there, use a copy of the pipeline without `acquire`,
-# `release-box` and `release`, with the default profile and the s3 store for dataset-prep's
-# versions.
+# (`artifact_target: s3`) cross through it. On one machine, use `finetune/sft-own-box` (`sft`
+# would start and stop the machine it runs on) with the default profile, none of the ssh settings,
+# and the s3 store for dataset-prep's versions.
 
 [profile]
 visibility = "public"

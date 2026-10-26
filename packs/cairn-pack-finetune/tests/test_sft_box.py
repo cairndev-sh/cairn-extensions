@@ -11,7 +11,8 @@ failed leg still stops the box.
 
 Hermetic: EC2 is a fake behind `CAIRN_EC2_CLIENT_FACTORY` (the core's documented dev seam), the
 `gpu` connection lives in a throwaway SQLite connection store, its SSH port is a local socket, and
-the ml legs run on a fake engine. No AWS call and no SSH connection is made.
+the ml legs run on a fake engine. No AWS call and no SSH connection is made. `sft-own-box`, the same
+pipeline without the box steps, is pinned to `sft` here and runs the same stub path with no EC2 call.
 """
 from __future__ import annotations
 
@@ -32,14 +33,18 @@ PROFILE = PACK / "profiles" / "finetune-ssh.toml"
 _FLOW = "flow:finetune/sft-train"
 
 
-def _pipeline() -> dict:
-    return yaml.safe_load((PACK / "pipelines" / "sft.yaml").read_text(encoding="utf-8"))
+#: The steps `sft` has and `sft-own-box` does not: the box cairn starts and stops (#26).
+_BOX_STEPS = {"acquire", "release-box", "release"}
 
 
-def _plan():
+def _pipeline(name: str = "sft") -> dict:
+    return yaml.safe_load((PACK / "pipelines" / f"{name}.yaml").read_text(encoding="utf-8"))
+
+
+def _plan(name: str = "sft"):
     from cairn.core.engine.pipeline import parse_pipeline_def, plan_pipeline
 
-    return plan_pipeline(parse_pipeline_def((PACK / "pipelines" / "sft.yaml").read_text(encoding="utf-8"),
+    return plan_pipeline(parse_pipeline_def((PACK / "pipelines" / f"{name}.yaml").read_text(encoding="utf-8"),
                                             pack="finetune"))
 
 
@@ -81,12 +86,15 @@ def test_both_releases_are_the_operator_the_core_cancels_jobs_before():
     assert default_registry.get_metadata("compute/acquire").risk == "paid_compute"
 
 
-def test_the_lease_covers_the_gpu_legs_timeouts_plus_a_margin():
+def test_the_lease_covers_the_retried_worst_case_plus_a_margin():
+    """A sweep must never stop the box under a retried leg: the lease is every attempt of every
+    ml leg, 2 × (30m + 12h) = 25h, plus a margin of at most two hours (an orphaned box bills
+    until the lease expires)."""
     plan = _plan()
-    legs_h = sum(s.timeout_s for s in plan.steps if s.ref == _FLOW) / 3600
+    worst_h = sum(s.timeout_s * s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref == _FLOW) / 3600
     max_hours = next(s for s in plan.steps if s.id == "acquire").inputs["max_hours"]
-    assert legs_h == 12.5
-    assert legs_h < max_hours <= legs_h + 1, (legs_h, max_hours)
+    assert worst_h == 25.0
+    assert worst_h < max_hours <= worst_h + 2, (worst_h, max_hours)
 
 
 def test_compute_connection_defaults_to_the_profiles_ml_target():
@@ -102,6 +110,53 @@ def test_the_budget_covers_the_documented_worst_case():
     attempts = {s.id: s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref == _FLOW}
     hours = sum(s.timeout_s / 3600 * attempts[s.id] for s in plan.steps if s.ref == _FLOW)
     assert hours == 25.0 and round(0.66 * hours, 2) == 16.5 <= _pipeline()["governance"]["budget"]["usd"]
+
+
+# ── sft-own-box: the same pipeline on a box cairn does not start or stop ──────
+
+def _without_the_box(d: dict) -> dict:
+    """`sft` as `sft-own-box` must read: the box steps and the `compute_connection` input
+    removed, and the dependencies that ran through them joined up again."""
+    d = yaml.safe_load(yaml.safe_dump(d))
+    d["inputs"].pop("compute_connection")
+    steps = [s for s in d["steps"] if s.get("id") not in _BOX_STEPS]
+    for s in steps:
+        if "depends_on" in s:
+            s["depends_on"] = [x for dep in s["depends_on"] for x in
+                               (["approve-run"] if dep == "acquire" else [] if dep == "release-box" else [dep])]
+        if "show" in s:
+            s["show"] = [f for f in s["show"] if f != "input.compute_connection"]
+    d["steps"] = steps
+    return d
+
+
+def test_sft_own_box_is_sft_without_the_box_steps():
+    """There is no include between pipeline files, so `sft-own-box.yaml` is a copy: this pins it
+    to `sft.yaml` key for key (gates, legs, timeouts, retries, budget, outputs) except the box."""
+    own, sft = _pipeline("sft-own-box"), _without_the_box(_pipeline("sft"))
+    assert own["name"] == "sft-own-box" and sft["name"] == "sft"
+    for key in ("name", "description", "outcome"):
+        own.pop(key), sft.pop(key)
+    assert own == sft
+
+
+def test_sft_own_box_plans_the_same_legs_and_gates_and_no_compute_step():
+    own, sft = _plan("sft-own-box"), _plan("sft")
+    assert not any(s.ref.startswith("task:compute/") or s.finalizer for s in own.steps)
+    assert [(s.id, s.ref, s.timeout_s) for s in own.steps] == [
+        (s.id, s.ref, s.timeout_s) for s in sft.steps if s.id not in _BOX_STEPS]
+    deps = {s.id: s.depends_on for s in own.steps}
+    assert deps["smoke"] == ["approve-run"] and deps["improved"] == ["train"]
+
+
+def test_the_presets_are_the_same_for_both_pipelines():
+    """A preset file names one pipeline: the `sft-own-box` copy must carry the same presets."""
+    sft = yaml.safe_load((PACK / "presets" / "ifc-bim-qwen3-4b.yaml").read_text(encoding="utf-8"))
+    own = yaml.safe_load((PACK / "presets" / "ifc-bim-qwen3-4b-own-box.yaml").read_text(encoding="utf-8"))
+    assert (sft.pop("pipeline"), own.pop("pipeline")) == ("finetune/sft", "finetune/sft-own-box")
+    assert own == sft
+    declared = set(_pipeline("sft-own-box")["inputs"])
+    assert all(set(p["inputs"]) <= declared for p in own["presets"])
 
 
 # ── the launch door and the in-process bridge ─────────────────────────────────
@@ -246,10 +301,10 @@ async def env(tmp_path, monkeypatch):
         ssh.close()
 
 
-def _sft():
+def _sft(name: str = "sft"):
     from cairn.core.engine.pipeline import parse_pipeline_def
 
-    return parse_pipeline_def((PACK / "pipelines" / "sft.yaml").read_text(encoding="utf-8"), pack="finetune")
+    return parse_pipeline_def((PACK / "pipelines" / f"{name}.yaml").read_text(encoding="utf-8"), pack="finetune")
 
 
 class _Capture:
@@ -418,5 +473,28 @@ async def test_a_failed_train_leg_still_stops_the_box(env, monkeypatch):
         assert rec.status == "failed" and rec.step_state["release"].status == "done"
         assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "ec2:stop"]
         assert env.ec2.state == "stopped"
+    finally:
+        b.stop()
+
+
+async def test_sft_own_box_runs_on_the_stub_with_no_ec2_call(env, monkeypatch):
+    """The same stub run on `sft-own-box`: the legs run on the profile's `gpu` box (priced, so
+    `approve-run` still shows the estimate), and cairn never calls EC2."""
+    engine = FakeBoxEngine(env.box, env.timeline, monkeypatch)
+    b, audits = await _bridge(engine, monkeypatch)
+    try:
+        from cairn.core.dispatch.pipeline_launch import launch_pipeline_def
+
+        rec = await launch_pipeline_def(_sft("sft-own-box"), inputs=_INPUTS, bridge=b)
+        pid = rec.pipeline_id
+        await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
+        (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
+        assert card["evidence"]["estimate_usd"] == pytest.approx(16.5)
+        await b.advance_step(pid, "approve-run", approver="ml-owner")
+        rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
+
+        assert env.timeline == ["submit:smoke", "submit:train"], "no EC2 call"
+        assert rec.status == "failed" and rec.step_state["improved"].status != "done"
+        assert set(rec.step_state) == {s.id for s in _plan("sft-own-box").steps}
     finally:
         b.stop()

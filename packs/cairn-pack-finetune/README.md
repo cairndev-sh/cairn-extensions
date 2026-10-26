@@ -5,8 +5,23 @@ prepared data only: registered `train`, `val` and `test` versions, as
 [`cairn-pack-dataset-prep`](../cairn-pack-dataset-prep) registers them (or your own JSONL splits
 registered with those roles). A rerun or a sweep reads the same frozen versions.
 
-A domain pack: YAML, a profile and a preset, no code. Every stage comes from
+A domain pack: YAML, a profile and presets, no code. Every stage comes from
 [`cairn-operator-training`](../../packages/cairn-operator-training).
+
+## Which pipeline
+
+| Your GPU box | Pipeline |
+|---|---|
+| An EC2 instance that cairn starts after approval and stops when it is done (a `compute.ssh` connection with `instance_id`, `region` and `hourly_usd`) | `finetune/sft` |
+| An SSH box you start and stop yourself (any provider), or one machine | `finetune/sft-own-box` |
+
+`sft-own-box` is `sft` without its three box steps (`acquire`, `release-box` and the `release`
+finalizer) and without the `compute_connection` input; its gates, legs, timeouts, retries, budget
+and outputs are the same (a test pins the two files together). On `sft-own-box` cairn never
+starts or stops the box, and a cancel does not stop a trainer already running on it: stop the
+job or the box yourself. Both price their ml legs on a connection with `hourly_usd`, and both
+show the estimate on `approve-run`. The rest of this README describes `sft`; for `sft-own-box`
+skip the box steps and `compute_connection`, and launch `finetune/sft-own-box`.
 
 ## The `sft` pipeline
 
@@ -65,7 +80,7 @@ in that range.
 ### 1. Install
 
 ```bash
-pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # the control plane
+pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # the control plane (brings boto3)
 pip install 'cairn-operator-training[gpu]'      # the GPU box; add ,track-mlflow for MLflow
 ```
 
@@ -74,7 +89,7 @@ To run unreleased changes, install from a checkout of this repository: on the co
 ./packs/cairn-pack-dataset-prep ./packs/cairn-pack-finetune`, and on the box `pip install
 ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages
 './packages/cairn-operator-training[gpu]'`. The control plane starts and stops the box through
-boto3, which `cairn-pack-dataset-prep` brings. The box must run the same `cairn-contracts-training*`
+boto3, a dependency of `cairn-pack-finetune` (cairndev declares it only in an extra). The box must run the same `cairn-contracts-training*`
 versions as the control plane, and needs `cairn-dataflow-run` on its non-interactive SSH `PATH`
 (`ssh <box> 'which cairn-dataflow-run'`), or `CAIRN_DATAFLOW_REMOTE_CMD=<venv>/bin/cairn-dataflow-run`
 on the control plane.
@@ -90,8 +105,9 @@ pip install 'cairndev[runtime-dbos]' && export CAIRN_RUNTIME=dbos   # optional: 
 Without `CAIRN_STORAGE` runs live in memory and are gone on restart. The schema migrates when the
 server first opens the store; upgrade every process that shares one database together. **Not
 Temporal:** `sft` has `task:` legs (`acquire`, the two releases, `promote`), which the Temporal
-pipeline owner does not run, and a `finalizer:` step, which it does not implement. The launch is
-refused under `CAIRN_RUNTIME=temporal` before any record exists (`cairn remote launch` exits 1
+pipeline owner does not run, and a `finalizer:` step, which it does not implement (`sft-own-box`
+has the `promote` task leg). The launch is refused under `CAIRN_RUNTIME=temporal` before any
+record exists (`cairn remote launch` exits 1
 with the reason; `cairn pipeline run` exits 3). Use `inprocess` (the default) or `dbos`.
 `cairn dev` sets its own: SQLite at `--db` (default `~/.cairn/dev.db`) and `inprocess`.
 
@@ -119,8 +135,9 @@ The control plane needs AWS credentials that allow `ec2:DescribeInstances`, `ec2
 `ec2:StartInstances` and `ec2:StopInstances` on that instance (the standard AWS chain: an
 instance role, `AWS_PROFILE`, or `AWS_*` variables). `sft`'s `compute_connection` input names the
 box to start and stop, and it **must be the connection `ml_target` selects** (`gpu` in
-`finetune-ssh`, the input's default). cairndev does not check that the two match; step 4's
-`explain` prints both (`acquire`'s `with.connection` and each ml leg's `compute:`). With a
+`finetune-ssh`, the input's default). cairndev does not check that the two match yet
+([cairndev-sh/cairn#216](https://github.com/cairndev-sh/cairn/issues/216)); step 4's `explain`
+prints both (`acquire`'s `with.connection` and each ml leg's `compute:`). With a
 mismatch, `acquire` starts one box while the ml legs run on another, and a cancel does not stop
 the job on the box the legs ran on. A box without an `instance_id` fails `acquire` (the finalizer
 still runs).
@@ -226,11 +243,13 @@ cairn replay <run_id> --source db                   # the recorded events as a t
   box. A job cancel that fails is logged and audited (`leg_job_cancel`, `sent: false`), and the
   box is stopped anyway. The record reads `cancelled` once the release has settled.
 - **The box:** `sft` starts it after `approve-run` and stops it after `train`, and the finalizer
-  stops it on every outcome. `acquire` stamps a lease of 13 hours (`cairn:release-after`: the two
-  legs' timeouts plus 30 minutes) before the start: if the control plane dies, `cairn compute
-  sweep` lists the box once the lease has passed and `--apply` stops it. The lease covers one
-  attempt of each leg, so a sweep run after it has passed stops the box under a retried `train`.
-  `cairn compute status gpu` shows whether the box is up and what it costs per hour.
+  stops it on every outcome. `acquire` stamps a lease of 26 hours (`cairn:release-after`) before
+  the start: the retried worst case, 2 attempts × (30 min + 12 h) = 25 h, plus an hour, so a
+  sweep never stops the box under a retried `train`. If the control plane dies, `cairn compute
+  sweep` lists the box once the lease has passed and `--apply` stops it. **The trade-off:** until
+  then an orphaned box keeps billing, up to 26 h (about $17 at $0.66/h), so run the sweep from a
+  cron, or stop the box yourself. `cairn compute status gpu` shows whether the box is up and what
+  it costs per hour.
 
 ### 9. Optional: an admission policy
 
@@ -254,17 +273,17 @@ under an unknown one, `holdout` included.
 **MLflow (optional):** `MLFLOW_TRACKING_URI` on the control plane with
 `-i 'report_to=["mlflow"]'` (or `-i report_to=mlflow`)
 records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` and must reach the
-URI. **On one machine:** `sft` starts and stops the box it trains on, so it does not run on one
-machine as it is. There, use a copy of the pipeline without `acquire`, `release-box` and
-`release`, with the default profile; dataset-prep still registers its versions through the s3
-store.
+URI. **On one machine:** use `finetune/sft-own-box` (`sft` would start and stop the machine it
+runs on) with the default profile and no ssh settings; dataset-prep still registers its versions
+through the s3 store.
 
 ## Presets and profiles
 
 | | |
 |---|---|
-| `presets/ifc-bim-qwen3-4b.yaml` | `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest` |
-| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`, venv mode), the s3 artifact store |
+| `presets/ifc-bim-qwen3-4b.yaml` | for `sft`: `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest` |
+| `presets/ifc-bim-qwen3-4b-own-box.yaml` | the same preset, `ifc-bim-qwen3-4b`, for `sft-own-box` (a preset file names one pipeline; a test keeps the two equal) |
+| `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`, venv mode), the s3 artifact store; for both pipelines (with `sft-own-box` the connection needs no `instance_id`) |
 
 ## Support
 
@@ -276,6 +295,7 @@ store.
 | `finetune-ssh` profile selection | EXPERIMENTAL | `tests/test_finetune_ssh_profile.py`: the core resolves the ml leg to the SSH engine on `gpu` (venv mode), the data leg to the local engine, the s3 store; no connection is made | 0.3.1 (the released wheel: a local run and CI) |
 | the box started and stopped by `sft`: `acquire` after `approve-run`, `release-box` after `train`, the finalizer `release`; a cancel cancels the job on the box first | EXPERIMENTAL | `tests/test_sft_box.py`: the plan; the pipeline through the core's launch door and in-process bridge on the stub trainer, with a fake EC2 client (the core's `CAIRN_EC2_CLIENT_FACTORY` seam): the box starts only after the approval and stops right after `train`; a cancel mid-`train` cancels the job before the box stops; a failed `train` still stops the box | 0.3.1 with a fake EC2 only (a local run and CI). A real start and stop on a public release is not proven yet: cairn-extensions#9 |
 | the GPU estimate at launch and on `approve-run` | EXPERIMENTAL | `tests/test_sft_box.py`: the core's launch door prices `smoke` and `train` on a `gpu` connection at $0.66/h ($16.50, two attempts each), `approve-run`'s evidence carries it and no later gate's does, and a $1.50/h box is refused against the $25 budget before any record | 0.3.1 (a local run and CI) |
+| `sft-own-box`: `sft` without the box steps | EXPERIMENTAL | `tests/test_sft_box.py`: the file is pinned to `sft.yaml` key for key except the box steps and `compute_connection`; its plan has the same legs and gates and no compute step; the same stub run on the core's launch door and bridge makes no EC2 call and shows the estimate on `approve-run` | 0.3.1 (a local run and CI) |
 | `sft` on an ssh GPU box with QLoRA | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

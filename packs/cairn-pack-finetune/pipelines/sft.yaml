@@ -35,9 +35,12 @@
 #
 # The box: `compute_connection` names the `compute.ssh` connection acquire starts and release
 # stops, and it MUST be the connection the environment's `ml_target` selects (`gpu` in the
-# `finetune-ssh` profile, this input's default). cairndev does not check that the two match:
-# `cairn pipeline explain finetune/sft` prints both. With a mismatch, acquire starts one box, the
+# `finetune-ssh` profile, this input's default). cairndev does not check that the two match yet
+# (cairndev-sh/cairn#216): `cairn pipeline explain finetune/sft` prints both. With a mismatch, acquire starts one box, the
 # ml legs run on another, and a cancel does not stop the job on the box the legs ran on.
+#
+# A box cairn does not start and stop (your own SSH box, any provider) or one machine:
+# `finetune/sft-own-box` is this pipeline without `acquire`, `release-box` and `release`.
 #
 # Not yet: the one-time comparison on `test_version` and a generation-quality evaluation need the
 # evaluation operators, which are not public yet (cairn-extensions#9 tracks the run that will use
@@ -90,7 +93,7 @@ inputs:
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
   # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
-  # `ml_target`; its `instance_id`, `region` and `hourly_usd` are the connection's settings.
+  # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.
   compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after train; must be the environment's ml_target (finetune-ssh: gpu)."}
 
 governance:
@@ -119,17 +122,19 @@ steps:
 
   # ── start the box, after the approval (ADR-0151 D11) ──────────────────────
   # `paid_compute`: under a profile that gates paid compute it pauses for its own approval too.
-  # `max_hours` is the lease `cairn compute sweep --apply` enforces if the control plane dies: the
-  # ml legs' timeouts (30m + 12h) plus a 30-minute margin. It covers one attempt of each: a sweep
-  # run after the lease expired stops the box under a retried `train`. A box acquire cannot start
-  # (no `instance_id` on the connection) fails this leg, and the finalizer still runs.
+  # `max_hours` is the lease `cairn compute sweep --apply` enforces if the control plane dies. It
+  # covers the retried worst case, 2 attempts × (30m + 12h) = 25h, plus a one-hour margin, so a
+  # sweep never stops the box under a retried `train`. The trade-off: a box orphaned by a dead
+  # control plane can bill until the lease expires and a sweep stops it (26h, $17.16 at $0.66/h).
+  # A box acquire cannot start (no `instance_id` on the connection) fails this leg, and the
+  # finalizer still runs.
   - id: acquire
     label: Start the GPU box
     task: compute/acquire
     depends_on: [approve-run]
     with:
       connection: $input.compute_connection
-      max_hours: 13
+      max_hours: 26
 
   # ── smoke: the whole path on a subsample, a few steps ─────────────────────
   - id: smoke
