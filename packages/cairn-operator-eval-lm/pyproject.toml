@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cairn-operator-eval-lm"
+version = "0.1.0"
+description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, task presets as pack data."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{name = "cairn maintainers"}]
+requires-python = ">=3.12"
+# Light by design: the Operation base, the context and the shared scorecard / budget contract
+# (cairn.core.eval.scorecard) come from the engine. lm-eval itself is the optional [harness]
+# extra below, imported lazily in operator_eval_lm.harness, so the pack registers and its tests
+# pass without it. The base install is the engine range this pack is proven on (ADR-0128 D3:
+# bounded, the same range as `[compat]`); the operator implements no shared contract yet, so
+# there is no contract wheel to pin.
+dependencies = [
+    "cairndev>=0.3.1,<0.4",
+]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Documentation = "https://docs.cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[project.optional-dependencies]
+# EleutherAI lm-evaluation-harness. Heavy (pulls torch + datasets) and only
+# needed when a benchmark actually runs, so it is an extra and never imported at
+# module scope. Without it eval/lm-eval no-ops with checked=false and a note.
+harness = ["lm-eval>=0.4.4"]
+
+[project.entry-points."cairn.operators"]
+"eval/lm-eval" = "operator_eval_lm.operators.lm_eval:LmEvalOp"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/operator_eval_lm"]
+exclude = ["CLAUDE.md", "AGENTS.md"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pack.toml" = "operator_eval_lm/pack.toml"
+
+# Process files (agent instructions) and tests stay out of the source archive.
+[tool.hatch.build.targets.sdist]
+exclude = ["CLAUDE.md", "AGENTS.md", "/.claude", "/tests"]

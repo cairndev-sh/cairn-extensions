@@ -1,0 +1,47 @@
+# cairn-operator-eval-lm — declarative manifest (ADR-0102 D5).
+#
+# Classic public benchmarks (lm-evaluation-harness) against a candidate that is ALREADY
+# SERVED (an OpenAI-compatible endpoint, such as a vLLM server), with the task lists
+# shipped as pack DATA under src/operator_eval_lm/presets/*.toml.
+#
+# Why not an in-process benchmark that loads base weights + a LoRA adapter on a GPU
+# (requires_gpu = true): this one is HTTP against a server someone else sized — no GPU
+# of its own, and the artefact it measures is the one that will ship.
+
+[pack]
+name        = "cairn-operator-eval-lm"
+version     = "0.1.0"
+type        = "operator"
+description = "eval/lm-eval: lm-evaluation-harness against a served candidate, presets as pack data."
+kind        = "operator"
+publisher   = "cairn"
+trust_level = "official"
+
+[compat]
+cairn_engine = ">=0.3.1,<0.4"
+
+# external_write, not read_only: the leg drives a served endpoint and consumes
+# its capacity (the same rule that makes a batch-inference operator external_write).
+# long_running: even the `smoke` preset is minutes. requires_gpu
+# is FALSE on purpose — the GPU belongs to the served model, so a benchmark can run
+# from the control plane while the box serves.
+[operator."eval/lm-eval"]
+version       = "0.1.0"
+input_schema  = "LmEvalInput"
+output_schema = "LmEvalOutput"
+long_running       = true
+requires_gpu       = false
+supports_cancel    = false
+supports_heartbeat = false
+supports_mock      = true
+risk      = "external_write"
+executors = ["in_process"]
+
+[operator."eval/lm-eval".capabilities]
+provides = ["eval.lm_eval"]
+
+# ADR-0103 — what this operator reports. Stages only: a benchmark has no
+# per-step series to stream, and the three scalars are what an Activity card wants.
+[operator."eval/lm-eval".reports]
+stages  = ["resolve", "evaluate", "score"]
+scalars = ["tasks_run", "cases", "cost_usd"]

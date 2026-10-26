@@ -1,0 +1,18 @@
+# knowledge — closed-book factual recall, the preset a CONTINUAL-LEARNING cycle
+# points its forgetting gate at.
+#
+# These are the "old tasks" in backward-transfer language: what the model knew
+# before this cycle. Cheap enough to run on every cycle, which matters more here
+# than depth — a forgetting number is only meaningful if it is measured the same
+# way every time.
+
+name        = "knowledge"
+description = "MMLU + TruthfulQA + OpenBookQA — the closed-book recall a forgetting gate watches."
+
+tasks = ["mmlu", "truthfulqa_mc2", "openbookqa"]
+
+num_fewshot = 0
+limit       = 200
+batch_size  = 8
+
+decontaminate = true
