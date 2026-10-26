@@ -35,8 +35,9 @@ The engine, the builtin operator packs and the core contracts live in
 
 ## Install
 
-Every package requires `cairndev` 0.2.x (`cairndev>=0.2.0,<0.3`; `>=0.2.1` for
-`cairn-operator-dataset-checks` and the domain packs). Once published, each installs by name:
+Every operator and domain pack requires `cairndev` 0.2.x or 0.3.x (`cairndev>=0.2.0,<0.4`;
+`>=0.2.1` for `cairn-operator-dataset-checks` and the domain packs); the contract wheels depend on
+nothing. CI proves each wheel on the newest released `cairndev` its pins select. Once published, each installs by name:
 
 ```bash
 pip install cairn-pack-dataset-prep cairn-pack-finetune   # the domain packs pull in their operator packs
@@ -108,7 +109,7 @@ tests declares them in a `test` extra, which CI installs.
 ## Status
 
 Two operator packs, their four contract wheels and two domain packs (`dataset-prep`,
-`finetune`) are on `main`, tested in CI against the released `cairndev` 0.2.x. Their support
+`finetune`) are on `main`, tested in CI against the newest released `cairndev` in range. Their support
 tables (in each README) say which paths have been re-proven on a public release. The first PyPI
 release is next (#10); the GPU qualification run of `finetune/sft` is #9.
 

@@ -16,7 +16,7 @@ publisher   = "cairn"
 trust_level = "official"
 
 [compat]
-cairn_engine = ">=0.2.1,<0.3"
+cairn_engine = ">=0.2.1,<0.4"
 
 [operator."dataset/format"]
 version       = "0.1.0"

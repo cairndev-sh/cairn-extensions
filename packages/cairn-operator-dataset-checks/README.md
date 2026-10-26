@@ -27,7 +27,7 @@ share one row vocabulary:
 ## Install
 
 This wheel and the contract wheels it pins are not on PyPI yet. Until they are, install from a
-checkout of this repository, into the environment `cairndev` 0.2.x runs in:
+checkout of this repository, into the environment `cairndev` 0.2.x or 0.3.x runs in:
 
 ```bash
 git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
@@ -50,7 +50,7 @@ pack; a path that cannot degrade raises an error naming its extra.
 | `tokenizers` | HF `tokenizers` for subword token counts; without it, whitespace word counts, said so in the stats. |
 | `split` | scikit-learn for grouped/stratified splits; without it, the deterministic hash split. |
 
-The base install pins `cairndev>=0.2.1,<0.3` and the two contract wheels exactly. Check an
+The base install pins `cairndev>=0.2.1,<0.4` and the two contract wheels exactly. Check an
 install with `cairn doctor` and `cairn pack check`.
 
 ## Support

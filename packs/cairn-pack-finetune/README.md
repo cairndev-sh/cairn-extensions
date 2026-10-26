@@ -48,8 +48,8 @@ Two machines: the **control plane** (the engine, the data leg, the gates and eve
 torch) and a **GPU box** reached over SSH, which runs only the trainer. Every command below is
 the `cairn` CLI; `<pl_id>` is a pipeline id (`pl_…`), `<run_id>` one leg's run.
 
-**Which cairndev.** The packs require `cairndev>=0.2.1,<0.3` today; accepting 0.3 is a
-separate change. Where cairndev 0.3.0 changes a step, the step says so: `remote_env`, cancel with
+**Which cairndev.** The packs require `cairndev>=0.2.1,<0.4`; CI proves them on the newest
+release in that range. Where cairndev 0.3.0 changes a step, the step says so: `remote_env`, cancel with
 the connection's key, `cairn ls finetune` listing the profile, comma-separated `list` inputs, and
 the Temporal refusal at launch.
 

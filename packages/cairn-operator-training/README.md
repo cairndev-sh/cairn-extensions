@@ -22,7 +22,7 @@ proven (clouds, Kubernetes, RunPod, Vast).
 ## Install
 
 This wheel and the contract wheels it pins are not on PyPI yet. Until they are, install from a
-checkout of this repository, into the environment `cairndev` 0.2.x runs in:
+checkout of this repository, into the environment `cairndev` 0.2.x or 0.3.x runs in:
 
 ```bash
 git clone https://github.com/cairndev-sh/cairn-extensions && cd cairn-extensions
@@ -48,7 +48,7 @@ stage the trainer writes its checkpoints and adapter under the job's workdir
 (`<workdir>/train-output/<output_name>`); the published adapter (`artifact_target: s3` or `hf`)
 is the adapter files only, never the `checkpoint-*` directories.
 
-The base install pins `cairndev>=0.2.0,<0.3` and the two contract wheels exactly. Check an
+The base install pins `cairndev>=0.2.0,<0.4` and the two contract wheels exactly. Check an
 install with `cairn doctor` and `cairn pack check`.
 
 ## Support
