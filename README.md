@@ -35,7 +35,8 @@ The engine, the builtin operator packs and the core contracts live in
 
 ## Install
 
-Every package requires `cairndev` 0.2.x or 0.3.x (`cairndev>=0.2.0,<0.4`; `>=0.2.1` for
+Every operator and domain pack requires `cairndev` 0.2.x or 0.3.x (the contract wheels depend on
+nothing) (`cairndev>=0.2.0,<0.4`; `>=0.2.1` for
 `cairn-operator-dataset-checks` and the domain packs). CI proves each wheel on the newest
 released `cairndev` its pins select. Once published, each installs by name:
 
