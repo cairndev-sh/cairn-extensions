@@ -70,7 +70,7 @@
 # Two machines need a store both can reach, so this profile selects the s3 artifact store: the
 # versions dataset-prep registers (it refuses to register from the local store) and the adapter
 # (`artifact_target: s3`) cross through it. On one machine, use `finetune/sft-own-box` (`sft`
-# would start and stop the machine it runs on) with the default profile, none of the ssh settings,
+# needs an EC2 instance to start and stop) with the default profile, none of the ssh settings,
 # and the s3 store for dataset-prep's versions.
 
 [profile]

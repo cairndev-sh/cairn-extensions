@@ -42,7 +42,8 @@ approve-run ⏸ → acquire → smoke → smoke-ok → train → release-box →
 - **`approve-run`:** a person reads it, and the GPU estimate, before GPU time is spent.
 - **`acquire`:** `compute/acquire` starts the box `compute_connection` names (an EC2 instance),
   only after the approval. It stamps the `cairn:managed` and `cairn:release-after` lease tags
-  first, then starts the instance and waits for its SSH port.
+  first, then starts the instance and waits up to 600 s for its SSH port (if the port is still
+  closed, `acquire` succeeds with `ssh_ready: false` and `smoke` fails on its own).
 - **`smoke`:** the [`sft-train`](flows/sft-train.yaml) flow on a recorded subsample
   (`smoke_rows`, default 64) for `smoke_steps` (default 5). It proves the data, the tokenizer,
   the trainer and the packaging cheaply.
@@ -139,8 +140,8 @@ box to start and stop, and it **must be the connection `ml_target` selects** (`g
 ([cairndev-sh/cairn#216](https://github.com/cairndev-sh/cairn/issues/216)); step 4's `explain`
 prints both (`acquire`'s `with.connection` and each ml leg's `compute:`). With a
 mismatch, `acquire` starts one box while the ml legs run on another, and a cancel does not stop
-the job on the box the legs ran on. A box without an `instance_id` fails `acquire` (the finalizer
-still runs).
+the job on the box the legs ran on. A box without an `instance_id` fails `acquire`, and the
+finalizer's release fails the same way; use `sft-own-box` for such a box.
 
 **On the box** the trainer reads `CAIRN_CHECKPOINT_BUCKET` (checkpoints, and the adapter with
 `artifact_target: s3`), `CAIRN_CHECKPOINT_PREFIX`, `AWS_DEFAULT_REGION` and, for MinIO,
@@ -243,7 +244,11 @@ cairn replay <run_id> --source db                   # the recorded events as a t
   box. A job cancel that fails is logged and audited (`leg_job_cancel`, `sent: false`), and the
   box is stopped anyway. The record reads `cancelled` once the release has settled.
 - **The box:** `sft` starts it after `approve-run` and stops it after `train`, and the finalizer
-  stops it on every outcome. `acquire` stamps a lease of 26 hours (`cairn:release-after`) before
+  stops it on every outcome that reaches it. Two gaps: a cancel that lands while `acquire` is
+  still starting the box can leave it running (core cancels flow legs, not a task leg in flight),
+  and a `release-box` that fails after `train` (a transient EC2 error) fails the pipeline before
+  `improved`: the candidate is registered, but promotion is manual. In both cases the finalizer
+  or the lease (below) stops the box. `acquire` stamps a lease of 26 hours (`cairn:release-after`) before
   the start: the retried worst case, 2 attempts × (30 min + 12 h) = 25 h, plus an hour, so a
   sweep never stops the box under a retried `train`. If the control plane dies, `cairn compute
   sweep` lists the box once the lease has passed and `--apply` stops it. **The trade-off:** until
@@ -273,8 +278,8 @@ under an unknown one, `holdout` included.
 **MLflow (optional):** `MLFLOW_TRACKING_URI` on the control plane with
 `-i 'report_to=["mlflow"]'` (or `-i report_to=mlflow`)
 records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` and must reach the
-URI. **On one machine:** use `finetune/sft-own-box` (`sft` would start and stop the machine it
-runs on) with the default profile and no ssh settings; dataset-prep still registers its versions
+URI. **On one machine:** use `finetune/sft-own-box` (`sft` needs an EC2 instance to start and
+stop) with the default profile and no ssh settings; dataset-prep still registers its versions
 through the s3 store.
 
 ## Presets and profiles
