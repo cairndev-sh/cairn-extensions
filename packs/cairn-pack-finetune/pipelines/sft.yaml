@@ -1,6 +1,7 @@
 # pipelines/sft.yaml — fine-tune on prepared dataset versions (cairn-extensions#7).
 #
-#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → improved → promote-model ⏸ → promote ⏸
+#   approve-run ⏸ → acquire → smoke (ml) → smoke-ok → train (ml) → release-box → improved
+#     → promote-model ⏸ → promote ⏸                       finally: release (on every outcome)
 #
 # Prepared data only: `train_version`, `val_version` and `test_version` are registered `dataset:`
 # refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. The launch
@@ -12,16 +13,34 @@
 #   * the base model's licence.
 # The decision is on the pipeline record and on the first gate's card.
 #
-#   * `approve-run` — a person reads the admission and the run's settings before GPU time is
-#     spent.
+#   * `approve-run` — a person reads the admission, the run's settings and the GPU estimate
+#     (`estimate_usd`, `estimate_basis` in the gate's evidence) before GPU time is spent.
+#   * `acquire` — `compute/acquire` starts the EC2 instance `compute_connection` names, after the
+#     approval: it stamps the `cairn:managed` / `cairn:release-after` lease first, then starts the
+#     box and waits for SSH (ADR-0151 D8, D11).
 #   * `smoke` — the same flow on a recorded subsample for a few steps: the whole path (data,
 #     tokenizer, trainer, packaging) proved cheaply before the full run.
 #   * `train` — the full run. The trainer evaluates on `val_version` at the end twice: the candidate
 #     (`eval_loss`) and, with the adapter switched off, the base model (`baseline_eval_loss`).
+#   * `release-box` — `compute/release` stops the box as soon as the last GPU leg is done, so it
+#     does not bill while a person decides on promotion (ADR-0151 D11).
 #   * `improved` — the candidate's validation loss must be below the base model's.
 #   * `promote-model` — a person decides, with the losses on the card.
 #   * `promote` — the `<tag>` points at the packaged adapter; `artifact/promote` asks for its own
 #     approval as well.
+#   * `release` — the same `compute/release` as a `finalizer:`: it runs once the pipeline is done,
+#     failed or cancelled, whatever the chain above reached. It is idempotent (a stopped box is a
+#     success). On a cancel, the engine job of a running `smoke` / `train` leg on the box is
+#     cancelled before this release stops the box (ADR-0151 D9).
+#
+# The box: `compute_connection` names the `compute.ssh` connection acquire starts and release
+# stops, and it MUST be the connection the environment's `ml_target` selects (`gpu` in the
+# `finetune-ssh` profile, this input's default). cairndev does not check that the two match yet
+# (cairndev-sh/cairn#216): `cairn pipeline explain finetune/sft` prints both. With a mismatch, acquire starts one box, the
+# ml legs run on another, and a cancel does not stop the job on the box the legs ran on.
+#
+# A box cairn does not start and stop (your own SSH box, any provider) or one machine:
+# `finetune/sft-own-box` is this pipeline without `acquire`, `release-box` and `release`.
 #
 # Not yet: the one-time comparison on `test_version` and a generation-quality evaluation need the
 # evaluation operators, which are not public yet (cairn-extensions#9 tracks the run that will use
@@ -73,8 +92,15 @@ inputs:
   artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local (the machine the ml leg ran on — on an ssh box, out of the control plane's reach), s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
+  # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
+  # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.
+  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after train; must be the environment's ml_target (finetune-ssh: gpu)."}
 
 governance:
+  # #27 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch door
+  # checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h) × 2 attempts = 25 box-hours,
+  # $16.50 at the example rate of $0.66/h. A box dearer than $1/h needs a larger budget, or a copy
+  # of this pipeline with shorter timeouts.
   budget: {usd: 25}
   series: sft
   approvers: ml-owners
@@ -90,12 +116,31 @@ steps:
       - input.base_model
       - input.method
       - input.max_steps
+      - input.compute_connection
+    # The GPU estimate is not a `show:` field: this is the gate before the first priced leg, so
+    # cairndev puts `estimate_usd` and `estimate_basis` in its evidence (ADR-0151 D4).
+
+  # ── start the box, after the approval (ADR-0151 D11) ──────────────────────
+  # `paid_compute`: under a profile that gates paid compute it pauses for its own approval too.
+  # `max_hours` is the lease `cairn compute sweep --apply` enforces if the control plane dies. It
+  # covers the retried worst case, 2 attempts × (30m + 12h) = 25h, plus a one-hour margin, so a
+  # sweep never stops the box under a retried `train`. The trade-off: a box orphaned by a dead
+  # control plane can bill until the lease expires and a sweep stops it (26h, $17.16 at $0.66/h).
+  # A box acquire cannot start (no `instance_id` on the connection) fails this leg, and the
+  # finalizer still runs.
+  - id: acquire
+    label: Start the GPU box
+    task: compute/acquire
+    depends_on: [approve-run]
+    with:
+      connection: $input.compute_connection
+      max_hours: 26
 
   # ── smoke: the whole path on a subsample, a few steps ─────────────────────
   - id: smoke
     label: Smoke run on a subsample
     flow: sft-train
-    depends_on: [approve-run]
+    depends_on: [acquire]
     timeout: 30m
     with: &run
       # #28 — an ml leg gets ONE attempt unless it declares more. Two: an attempt whose process
@@ -103,7 +148,7 @@ steps:
       # reports as retriable, runs once more, under the same run, and the trainer resumes
       # from that run's checkpoints in CAIRN_CHECKPOINT_BUCKET. A leg that fails on its own error
       # (a clean non-zero exit) is never retried. Each attempt reserves its own budget estimate;
-      # from the cairndev release after 0.3.0 the launch estimate of a priced leg is hourly_usd × timeout × 2.
+      # on a priced box the launch estimate of the leg is hourly_usd × timeout × 2 (cairndev 0.3.1).
       retry: {max_attempts: 2}
       train_uri: $input.train_version
       eval_uri: $input.val_version
@@ -157,9 +202,18 @@ steps:
       max_eval_loss: $input.max_eval_loss
       registered_model_name: $input.registered_model_name
 
+  # ── stop the box: the last GPU leg is done (ADR-0151 D11) ─────────────────
+  # Before any person decides on promotion, so the box does not bill while it waits.
+  - id: release-box
+    label: Stop the GPU box
+    task: compute/release
+    depends_on: [train]
+    with:
+      connection: $input.compute_connection
+
   # ── the verdict: better than the model it started from, on the same rows ──
   - gate: improved
-    depends_on: [train]
+    depends_on: [train, release-box]
     predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
 
   # ── the PERSON gate on the model ──────────────────────────────────────────
@@ -183,6 +237,16 @@ steps:
       tag: $input.tag
       artifact_id: $steps.train.candidate_artifact_id
       reason: "validation loss below the base model's, and a person approved"
+
+  # ── the backstop: stop the box on every outcome (ADR-0097, ADR-0151 D9/D11) ──
+  # Wired from `$input`, never from `$steps.acquire`, so it resolves even when acquire never
+  # ran. Under CAIRN_RUNTIME=temporal a plan with a finalizer is refused at launch (D10).
+  - id: release
+    label: Stop the GPU box (finally)
+    task: compute/release
+    finalizer: true
+    with:
+      connection: $input.compute_connection
 
 outputs:
   adapter: train.candidate_artifact_id

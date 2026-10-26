@@ -129,7 +129,7 @@ def test_the_commented_remote_env_line_is_one_the_ssh_engine_accepts(tmp_path, m
     "AWS_DEFAULT_REGION",
     "CAIRN_ARTIFACT_S3_BUCKET",
     "MLFLOW_TRACKING_URI",
-    "cairndev 0.2.1, cancel and the engine's stage-checkpoint relay",
+    "cancel and the engine's stage-checkpoint relay",
     "SSH_PRIVATE_KEY",
     "AWS_ENDPOINT_URL",
     "read access",
@@ -140,7 +140,15 @@ def test_the_commented_remote_env_line_is_one_the_ssh_engine_accepts(tmp_path, m
     "CAIRN_RUNTIME=dbos",
     "CAIRN_RUNTIME=temporal",
     "cairn ls finetune",
-    "From cairndev 0.3.0 both use",
+    # cairn-extensions#26: the box sft starts and stops, and what the control plane needs for it
+    "instance_id=",
+    "region=",
+    "hourly_usd=",
+    "boto3",
+    "ec2:StartInstances",
+    "ec2:StopInstances",
+    "compute_connection",
+    "cairndev 0.3.1",
 ])
 def test_the_header_names_what_a_deployment_must_set(needle):
     header = PROFILE.read_text(encoding="utf-8").split("[profile]")[0]

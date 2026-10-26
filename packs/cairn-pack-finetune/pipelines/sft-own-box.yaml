@@ -1,0 +1,185 @@
+# pipelines/sft-own-box.yaml — `sft` on a box cairn does not start or stop (cairn-extensions#26).
+#
+#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → improved → promote-model ⏸ → promote ⏸
+#
+# The same pipeline as `sft.yaml` without its three box steps (`acquire`, `release-box` and the
+# `release` finalizer) and without the `compute_connection` input: for an SSH box you start and
+# stop yourself (any provider), or for one machine. Everything else is `sft`'s, line for line:
+# the admission at the launch door, the gates, the legs, their timeouts and retries, the budget,
+# and the outputs; read `sft.yaml` for what each step does. There is no include between pipeline
+# files, so this is a copy; tests/test_sft_box.py fails if the two drift apart.
+#
+# On a connection with `hourly_usd` the ml legs are priced as in `sft`, and `approve-run` shows
+# the estimate. The box is yours: cairn never starts or stops it, and a cancel does not stop a
+# trainer already running on it (stop the job or the box yourself). `cairn compute status <name>`
+# shows whether it is up.
+name: sft-own-box
+kind: pipeline
+visibility: public
+description: >
+  Fine-tune a base model with LoRA or QLoRA on prepared train / val / test versions, on a box
+  you start and stop yourself (or one machine): a smoke run, the full run with the base model's
+  validation loss as the baseline, a person's decision, and a governed tag on the adapter.
+outcome: Fine-tune a model on prepared data on your own box and decide whether to keep it
+suite: model
+
+inputs:
+  # ADR-0146 — each version must have the role its input names, and a training version must carry
+  # an intake verdict; the launch door refuses anything else before a record exists.
+  train_version: {type: str, role: training, verdict: required, description: "dataset:<name>-train@<v> — the registered training version."}
+  val_version: {type: str, role: validation, verdict: required, description: "dataset:<name>-val@<v> — the registered validation version."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; recorded, never trained on."}
+  base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
+  accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
+  method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}
+  output_name: {type: str, default: "sft-candidate", description: "The adapter's name, and its directory under the leg's workdir on the box (train-output/<output_name>). A retry of the same run resumes from its own checkpoints in CAIRN_CHECKPOINT_BUCKET; another run never does."}
+  smoke_output_name: {type: str, default: "sft-smoke", description: "The smoke run's adapter name (its own directory)."}
+  tag: {type: str, default: "sft-adapter@candidate", description: "The governed tag promote points at the adapter."}
+  epochs: {type: float, default: 1.0}
+  max_steps: {type: int, default: 0, description: "Optimizer steps for the full run; 0 = run the epochs."}
+  learning_rate: {type: float, default: 0.0002}
+  lora_r: {type: int, default: 16}
+  lora_alpha: {type: int, default: 32}
+  lora_dropout: {type: float, default: 0.0}
+  target_modules: {type: str, default: "", description: "Comma-separated LoRA targets; empty = the trainer's default."}
+  max_seq_len: {type: int, default: 2048}
+  seed: {type: int, default: 3407}
+  per_device_batch_size: {type: int, default: 0, description: "0 = the trainer's default."}
+  gradient_accumulation_steps: {type: int, default: 0, description: "0 = the trainer's default."}
+  gradient_checkpointing: {type: bool, default: true}
+  packing: {type: bool, default: false, description: "Pack short rows into full sequences; off by default so every example is one sequence."}
+  eval_steps: {type: int, default: 50}
+  save_steps: {type: int, default: 50}
+  save_total_limit: {type: int, default: 2}
+  max_eval_loss: {type: float, default: 0, description: "Fail the full run fast when its final validation loss is above this (0 = no ceiling)."}
+  smoke_rows: {type: int, default: 64, description: "Rows of the train version the smoke run trains on."}
+  smoke_steps: {type: int, default: 5, description: "Optimizer steps of the smoke run."}
+  report_to: {type: list, default: [], description: "Experiment trackers, e.g. [mlflow]; the tracker URI comes from the environment."}
+  tracking_project: {type: str, default: "sft"}
+  artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local (the machine the ml leg ran on — on an ssh box, out of the control plane's reach), s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
+  registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
+  stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
+
+governance:
+  # #27 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch door
+  # checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h) × 2 attempts = 25 box-hours,
+  # $16.50 at the example rate of $0.66/h. A box dearer than $1/h needs a larger budget, or a copy
+  # of this pipeline with shorter timeouts.
+  budget: {usd: 25}
+  series: sft
+  approvers: ml-owners
+
+steps:
+  # ── the PERSON gate before any GPU time ───────────────────────────────────
+  - gate: approve-run
+    approvers: ml-owners
+    show:
+      - input.train_version
+      - input.val_version
+      - input.test_version
+      - input.base_model
+      - input.method
+      - input.max_steps
+    # The GPU estimate is not a `show:` field: this is the gate before the first priced leg, so
+    # cairndev puts `estimate_usd` and `estimate_basis` in its evidence (ADR-0151 D4).
+
+  # ── smoke: the whole path on a subsample, a few steps ─────────────────────
+  - id: smoke
+    label: Smoke run on a subsample
+    flow: sft-train
+    depends_on: [approve-run]
+    timeout: 30m
+    with: &run
+      # #28 — an ml leg gets ONE attempt unless it declares more. Two: an attempt whose process
+      # died without writing its exit code (the OOM killer, a kill on the box), which the engine
+      # reports as retriable, runs once more, under the same run, and the trainer resumes
+      # from that run's checkpoints in CAIRN_CHECKPOINT_BUCKET. A leg that fails on its own error
+      # (a clean non-zero exit) is never retried. Each attempt reserves its own budget estimate;
+      # on a priced box the launch estimate of the leg is hourly_usd × timeout × 2 (cairndev 0.3.1).
+      retry: {max_attempts: 2}
+      train_uri: $input.train_version
+      eval_uri: $input.val_version
+      test_uri: $input.test_version
+      base_model: $input.base_model
+      method: $input.method
+      epochs: $input.epochs
+      learning_rate: $input.learning_rate
+      lora_r: $input.lora_r
+      lora_alpha: $input.lora_alpha
+      lora_dropout: $input.lora_dropout
+      target_modules: $input.target_modules
+      max_seq_len: $input.max_seq_len
+      seed: $input.seed
+      per_device_batch_size: $input.per_device_batch_size
+      gradient_accumulation_steps: $input.gradient_accumulation_steps
+      gradient_checkpointing: $input.gradient_checkpointing
+      packing: $input.packing
+      eval_steps: $input.eval_steps
+      save_steps: $input.save_steps
+      save_total_limit: $input.save_total_limit
+      report_to: $input.report_to
+      tracking_project: $input.tracking_project
+      artifact_target: $input.artifact_target
+      stub: $input.stub
+      fidelity_rows: $input.smoke_rows
+      max_steps: $input.smoke_steps
+      # Its own adapter name: the full run must never resume from the smoke run's checkpoints
+      # (it would carry the smoke steps). Each leg is its own run with its
+      # own workdir and checkpoint key, so the name keeps the two adapters apart on the record.
+      output_name: $input.smoke_output_name
+
+  - gate: smoke-ok
+    depends_on: [smoke]
+    # A failed trainer already fails the leg; this checks the path ended in a packaged adapter.
+    predicate: steps.smoke.findings.package_adapter_packaged == `true` && length(steps.smoke.findings.train_qlora_adapter_uri) > `0`
+
+  # ── the full run, with the base model's validation loss as the baseline ───
+  - id: train
+    label: Fine-tune
+    flow: sft-train
+    depends_on: [smoke-ok]
+    timeout: 12h
+    with:
+      <<: *run
+      retry: {max_attempts: 2}   # as smoke's (#28), stated here because this is the 12-hour leg
+      output_name: $input.output_name
+      fidelity_rows: 0
+      max_steps: $input.max_steps
+      baseline_eval: true
+      max_eval_loss: $input.max_eval_loss
+      registered_model_name: $input.registered_model_name
+
+  # ── the verdict: better than the model it started from, on the same rows ──
+  - gate: improved
+    depends_on: [train]
+    predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
+
+  # ── the PERSON gate on the model ──────────────────────────────────────────
+  - gate: promote-model
+    depends_on: [improved]
+    approvers: ml-owners
+    show:
+      - train.train_qlora_baseline_eval_loss
+      - train.train_qlora_eval_loss
+      - train.train_qlora_train_loss
+      - train.train_qlora_steps
+      - train.candidate_artifact_id
+      - input.test_version
+
+  # ── tag the adapter (an operator-declared gate) ───────────────────────────
+  - id: promote
+    label: Tag the adapter
+    task: artifact/promote
+    depends_on: [promote-model]
+    with:
+      tag: $input.tag
+      artifact_id: $steps.train.candidate_artifact_id
+      reason: "validation loss below the base model's, and a person approved"
+
+outputs:
+  adapter: train.candidate_artifact_id
+  adapter_uri: train.train_qlora_adapter_uri
+  baseline_eval_loss: train.train_qlora_baseline_eval_loss
+  eval_loss: train.train_qlora_eval_loss
+  train_loss: train.train_qlora_train_loss
+  promoted: promote.artifact_id

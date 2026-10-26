@@ -4,6 +4,8 @@
 #     CAIRN_PROFILE=<…>/profiles/finetune-ssh.toml   # on the server: the ml legs go to the gpu box
 #     cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
 #
+# `ifc-bim-qwen3-4b-own-box.yaml` is the same preset for `finetune/sft-own-box`.
+#
 # `@latest` resolves when the run launches and is recorded on the run as the version number it
 # resolved to; pin a number (`@1`) to rerun against the same versions on purpose.
 pipeline: finetune/sft
