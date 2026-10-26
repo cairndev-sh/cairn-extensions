@@ -45,9 +45,18 @@ is prompt text, so it is reported by group size only.
 
 ```bash
 pip install cairn-pack-dataset-prep            # the pipeline; near dedup and tokenizers: [all]
+cairn remote presets dataset-prep/prepare      # the shipped presets
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch
 cairn remote advance <pipeline-id> source-ok  # a person confirms the source
+cairn remote findings <pipeline-id>           # rows in, duplicates dropped, lengths, the three versions
 ```
+
+The package publishes to PyPI soon (cairn-extensions#10). Until then, install it from a checkout
+of this repository, with the operator pack and contract wheels it needs:
+`pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-dataset-stages
+'./packages/cairn-operator-dataset-checks[minhash,tokenizers]' ./packs/cairn-pack-dataset-prep`.
+Runs need a durable store (`CAIRN_STORAGE`) to survive a restart, as every pipeline does; the
+`cairn-pack-finetune` README's "Run it" covers the control plane end to end.
 
 Any dataset: `-i path=<hub id | file | s3://…> -i register=<name>`, plus `-i revision=<commit>`
 for a Hub source. Add `group_by`, `derive`, `topic_fields` and `group_fields` when the rows carry,

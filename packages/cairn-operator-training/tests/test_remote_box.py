@@ -151,6 +151,45 @@ def test_a_retry_resumes_from_its_own_checkpoints_and_another_run_does_not(tmp_p
         assert CS.pull_checkpoints_if_any(CS.trainer_output_dir("sft", tmp_path / "other")) is None
 
 
+def test_the_stub_keeps_checkpoints_and_a_retry_continues_from_them(tmp_path, monkeypatch):
+    """cairn-extensions#28 — with a checkpoint bucket the stub checkpoints every `save_steps` like
+    the real trainer, so a pipeline test can prove a retry resumes: the second attempt, in a fresh
+    workdir, pulls the run's newest checkpoint and continues from its step. Without a bucket it
+    writes nothing (the stub as before)."""
+    boto3 = pytest.importorskip("boto3")
+    moto = pytest.importorskip("moto")
+    from operator_training.operators.stub import StubTrainOp
+
+    def attempt(workdir):
+        ctx = types.SimpleNamespace(report=None, workdir=workdir)
+        spec = TrainSpec(dataset_uri="ds", output_name="sft", max_steps=6, save_steps=2, stub=True)
+        return asyncio.run(StubTrainOp().run(spec, ctx)).metrics
+
+    assert "checkpoint_uri" not in attempt(tmp_path / "no-bucket")
+    assert not (tmp_path / "no-bucket").exists()
+
+    for name, value in (("AWS_ACCESS_KEY_ID", "t"), ("AWS_SECRET_ACCESS_KEY", "t"),
+                        ("AWS_DEFAULT_REGION", "us-east-1"), ("CAIRN_CHECKPOINT_BUCKET", "ckpts"),
+                        ("CAIRN_PARENT_RUN", "run-a")):
+        monkeypatch.setenv(name, value)
+    with moto.mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket="ckpts")
+        # the first attempt died after checkpoint-2 reached S3
+        died = Path(CS.trainer_output_dir("sft", tmp_path / "attempt-1")) / "checkpoint-2"
+        died.mkdir(parents=True)
+        (died / "trainer_state.json").write_text(json.dumps({"global_step": 2}))
+        CS.upload_dir(str(died), "ckpts", f"{CS.DEFAULT_PREFIX}/run-a/checkpoint-2")
+
+        uploaded = []
+        monkeypatch.setattr(CS, "upload_dir", lambda d, b, k: uploaded.append(k.rsplit("/", 1)[1]))
+        metrics = attempt(tmp_path / "attempt-2")
+    assert uploaded == ["checkpoint-4", "checkpoint-6"]
+    assert metrics["resumed_from_checkpoint"] == CS.trainer_output_dir("sft", tmp_path / "attempt-2") + "/checkpoint-2"
+    assert metrics["checkpoint_uri"] == f"s3://ckpts/{CS.DEFAULT_PREFIX}/run-a/"
+    assert metrics["steps"] == 6
+
+
 # ── the published adapter is the adapter only ───────────────────────────────
 
 def test_s3_publish_uploads_the_adapter_files_and_no_checkpoint(tmp_path, monkeypatch):

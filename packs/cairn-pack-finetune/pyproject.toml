@@ -23,6 +23,11 @@ dependencies = [
     "cairn-operator-training>=0.1,<0.2",
 ]
 
+[project.optional-dependencies]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
+# moto: a fake S3 for the checkpoint bucket a retried leg resumes from (#28).
+test = ["moto[s3]>=5"]
+
 [project.urls]
 Homepage = "https://cairndev.sh"
 Source = "https://github.com/cairndev-sh/cairn-extensions"
@@ -45,7 +50,8 @@ bypass-selection = true
 "flows" = "cairn_pack_finetune/flows"
 "presets" = "cairn_pack_finetune/presets"
 "profiles" = "cairn_pack_finetune/profiles"
+"docs" = "cairn_pack_finetune/docs"   # the example policy: data, never loaded by the pack
 
 [tool.hatch.build.targets.sdist]
-include = ["__init__.py", "pack.toml", "pipelines", "flows", "presets", "profiles", "tests", "README.md", "LICENSE",
-           "NOTICE", "pyproject.toml"]
+include = ["__init__.py", "pack.toml", "pipelines", "flows", "presets", "profiles", "docs", "tests", "README.md",
+           "LICENSE", "NOTICE", "pyproject.toml"]

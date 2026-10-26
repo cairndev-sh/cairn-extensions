@@ -80,7 +80,12 @@ loss/optimiser curve at every `logging_steps` (`loss`, `eval_loss`, `learning_ra
 `nvidia-smi`/`psutil` when present); **scalars** at the end (`final_loss`, `best_eval_loss`,
 `tokens_seen`, `steps`, `train_runtime_s`). `checkpoint` fires on every trainer save with the
 step and the best eval loss so far. The stub emits a five-point curve of the same vocabulary
-so a `stub: true` pipeline exercises the whole live path.
+so a `stub: true` pipeline exercises the whole live path. With `CAIRN_CHECKPOINT_BUCKET` set
+(and `max_steps`, `save_steps` and a workdir), the stub also keeps checkpoints the way the
+trainer does: it pulls the run's newest one, continues from its `global_step`, and mirrors a
+`checkpoint-<step>/trainer_state.json` every `save_steps`, so a retried leg can be shown to
+resume (cairn-extensions#28). It reports `resumed_from_checkpoint` and `checkpoint_uri` as
+`train_entry` does. The files hold only the step.
 
 **The fidelity knob** (`sample.fidelity`, a `cairn.flow_stages` kernel in `flow_stages.py`) is
 the other half of #2029: it keeps the `n` rows with the smallest `H(seed ‖ row_hash)` — a
@@ -228,3 +233,4 @@ pack — install it before trusting them.
 | 2026-10-21 | Moved public to `cairndev-sh/cairn-extensions` with its two contract wheels: `train/proxy-trial` and its Optuna ranking stay with the platform; `sample.fidelity` imports `cairn.core.dataflow.fidelity` (cairndev 0.2.0); the `[gpu]` extra is the exact trainer pin set; `[compat]` and the `cairndev` pin are bounded to `>=0.2.0,<0.3`. |
 | 2026-10-22 | #4: `train.qlora` implements `training.stage.train_qlora/1.1.0` (governed train/eval/test splits; batch, accumulation, checkpointing and dropout knobs; `extra` out of the configuration); `splits.py` shared by both trainers; `cairn-contracts-training-stages` 1.1.0. |
 | 2026-10-21 | One trainer, no provider clients: `train/modal`, `train/kaggle`, `train/runpod`, `train/vast`, `train/stage-dataset`, `train/teardown`, `managed_leg` and the published-image pin leave the public wheel; where a run goes is the engine's choice (ssh today). The `modal` and `kaggle` extras go with them. |
+| 2026-10-26 | #28: the stub tier keeps run-scoped checkpoints in `CAIRN_CHECKPOINT_BUCKET` and resumes from them, so the `sft` retry is proven on the stub |
