@@ -390,37 +390,133 @@ def test_run_harness_builds_the_model_with_the_key_as_a_header(monkeypatch):
     """The seam against a stand-in ``lm_eval`` shaped like 0.4.13's API: the model is
     built through the registry with the explicit header, ``simple_evaluate`` gets the
     model object (never the key in ``model_args``), and an argument it does not take
-    is dropped. The stand-in is removed again, so nothing else sees an ``lm_eval``."""
+    is dropped and reported. The stand-in is removed again, so nothing else sees an
+    ``lm_eval``."""
+    rec = _stand_in_lm_eval(monkeypatch)
+    out = harness.run_harness(
+        model="local-completions", model_args="model=m,base_url=http://x/v1", tasks=["gsm8k"],
+        api_key="sk-a", num_fewshot=0, batch_size=8, limit=4, decontamination_ngrams_path=None)
+    assert rec["built"][0]["header"]["Authorization"] == "Bearer sk-a"
+    assert "sk-a" not in rec["built"][0]["arg_string"]
+    called = rec["called"][0]
+    assert called["model"].header["Authorization"] == "Bearer sk-a"
+    assert "model_args" not in called
+    assert called["tasks"] == ["gsm8k"] and called["limit"] == 4
+    assert out[harness.DROPPED_KEY] == ["decontamination_ngrams_path"]
+    assert out[harness.VERSION_KEY] == "0.4.13"
+    assert os.environ.get("OPENAI_API_KEY") != "sk-a"
+
+
+# ── what the installed lm-eval does not take, and a model that ignores the header ──
+
+
+_ALL_ARGS = ("num_fewshot", "batch_size", "limit")
+
+
+def _stand_in_lm_eval(monkeypatch, *, accepts=_ALL_ARGS, honours_header=True, version="0.4.13",
+                      decontaminated=True):
+    """Install a stand-in ``lm_eval`` shaped like 0.4.13's API whose ``simple_evaluate``
+    takes only ``accepts`` (plus model and tasks), and whose model either keeps the
+    header it is built with or, like a release that ignores it, falls back to the env
+    key. Returns a record of what was built and called; ``monkeypatch`` removes it."""
     import types
 
-    built: dict = {}
-    called: dict = {}
+    rec: dict = {"built": [], "called": []}
 
     class _Model:
+        def __init__(self, **kw):
+            self._header = kw.get("header") if honours_header else None
+
+        @property
+        def header(self):
+            return self._header or {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"}
+
         @classmethod
         def create_from_arg_string(cls, arg_string, additional_config=None):
-            built.update(arg_string=arg_string, **(additional_config or {}))
-            return cls()
+            rec["built"].append({"arg_string": arg_string, **(additional_config or {})})
+            return cls(**(additional_config or {}))
 
-    def simple_evaluate(model=None, model_args=None, tasks=None, num_fewshot=None,
-                        batch_size=None, limit=None):
-        called.update(model=model, model_args=model_args, tasks=tasks, limit=limit)
-        return _fake_results()
+    params = ", ".join(f"{a}=None" for a in accepts)
+    ns: dict = {}
+    exec(f"def simple_evaluate(model=None, tasks=None, {params}):\n    return CALL(locals())", ns)
+    ns["CALL"] = lambda args: rec["called"].append(args) or _fake_results(decontaminated=decontaminated)
 
     lm_eval = types.ModuleType("lm_eval")
-    lm_eval.simple_evaluate = simple_evaluate
+    lm_eval.__version__ = version
+    lm_eval.simple_evaluate = ns["simple_evaluate"]
     api = types.ModuleType("lm_eval.api")
     registry = types.ModuleType("lm_eval.api.registry")
     registry.get_model = lambda name: _Model
     monkeypatch.setitem(sys.modules, "lm_eval", lm_eval)
     monkeypatch.setitem(sys.modules, "lm_eval.api", api)
     monkeypatch.setitem(sys.modules, "lm_eval.api.registry", registry)
+    return rec
 
-    harness.run_harness(model="local-completions", model_args="model=m,base_url=http://x/v1",
-                        tasks=["gsm8k"], api_key="sk-a", num_fewshot=0, batch_size=8, limit=4,
-                        decontamination_ngrams_path=None)
-    assert built["header"]["Authorization"] == "Bearer sk-a"
-    assert "sk-a" not in built["arg_string"]
-    assert isinstance(called["model"], _Model) and called["model_args"] is None
-    assert called["tasks"] == ["gsm8k"] and called["limit"] == 4
-    assert "OPENAI_API_KEY" not in os.environ or os.environ["OPENAI_API_KEY"] != "sk-a"
+
+@pytest.mark.parametrize("missing", ["limit", "num_fewshot"])
+def test_a_bound_the_installed_lm_eval_cannot_take_is_a_refusal(monkeypatch, missing):
+    """Dropping ``limit`` would run every document of every task against the endpoint
+    (smoke asks for 40); dropping ``num_fewshot`` changes the scores. Neither may be
+    dropped silently: the run refuses before the model is built (which probes the
+    endpoint) and sends nothing."""
+    rec = _stand_in_lm_eval(monkeypatch, accepts=[a for a in _ALL_ARGS if a != missing],
+                            version="9.9.9")
+    out = _run(_served(decontaminate=False))
+    assert out.checked is False and out.metrics == {}
+    assert missing in out.note and "9.9.9" in out.note
+    assert rec["built"] == [] and rec["called"] == []
+
+
+def test_another_dropped_argument_is_listed_in_the_note(monkeypatch):
+    rec = _stand_in_lm_eval(monkeypatch, accepts=("num_fewshot", "limit"))
+    out = _run(_served(decontaminate=False))
+    assert out.checked is True
+    assert "batch_size" in out.note and "0.4.13" in out.note
+    assert len(rec["called"]) == 1
+
+
+def test_a_seam_dropped_decontamination_request_says_so(monkeypatch):
+    """lm-eval 0.4.10–0.4.13 take no decontamination argument: the note must say the
+    request was not passed, not blame the tasks."""
+    _stand_in_lm_eval(monkeypatch, decontaminated=False)
+    out = _run(_served())  # decontaminate defaults to true
+    assert out.checked is True and out.decontamination_requested is True
+    assert "no decontamination argument" in out.note
+    assert "should_decontaminate" not in out.note
+
+
+def test_a_model_that_ignores_the_header_is_refused_before_any_request(monkeypatch):
+    """A release that drops ``header`` would send ``Bearer $OPENAI_API_KEY``. The seam
+    compares the built model's effective header with the one it passed and refuses."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-deployment")
+    rec = _stand_in_lm_eval(monkeypatch, honours_header=False)
+    out = _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-a"})
+    assert out.checked is False and out.metrics == {}
+    assert "header" in out.note
+    assert "sk-tenant-a" not in out.note and "sk-deployment" not in out.note
+    assert rec["called"] == [], "simple_evaluate ran with a model that ignored the header"
+
+
+def test_a_model_that_ignores_the_header_is_refused_without_a_key_too(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-deployment")
+    rec = _stand_in_lm_eval(monkeypatch, honours_header=False)
+    out = _run(_served())
+    assert out.checked is False and rec["called"] == []
+
+
+def test_the_key_is_redacted_from_a_harness_failure_note(monkeypatch):
+    def _boom(**kw):
+        raise RuntimeError(f"401 Unauthorized (sent Bearer {kw['api_key']})")
+
+    monkeypatch.setattr(harness, "run_harness", _boom)
+    out = _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-a"})
+    assert out.checked is False and "harness failed" in out.note
+    assert "sk-tenant-a" not in out.note and "sk-tenant-a" not in str(out.audit_metadata)
+
+
+def test_the_harness_extra_is_bounded_to_the_releases_read():
+    import tomllib
+    from pathlib import Path
+
+    project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    assert project["project"]["optional-dependencies"]["harness"] == ["lm-eval>=0.4.10,<0.5"]

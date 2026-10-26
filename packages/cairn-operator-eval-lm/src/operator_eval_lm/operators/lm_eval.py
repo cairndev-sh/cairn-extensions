@@ -33,7 +33,10 @@ worker thread (``asyncio.to_thread``) and the event loop keeps serving other run
 a thread that already runs a loop. A CANCEL stops the operator waiting, but a
 thread cannot be killed: the harness call runs on to its end in the background,
 still sending requests to the endpoint, and its result is discarded
-(``supports_cancel = false`` says as much).
+(``supports_cancel = false`` says as much). ``to_thread`` uses the loop's default
+executor, so a long or cancelled harness call holds one of its worker slots until
+it finishes; enough concurrent benchmarks can fill that pool and delay everything
+else in the process that uses it.
 
 The endpoint key (``api_key_env``, read through ``ctx.secrets``) goes to the harness
 call and nowhere else: never into ``os.environ``, which every run in the process
@@ -73,6 +76,16 @@ LM_EVAL_REPORTS = ReportSpec(
     stages=["resolve", "evaluate", "score"],
     scalars=["tasks_run", "cases", "cost_usd"],
 )
+
+
+#: The seam's decontamination argument; lm-eval 0.4.10-0.4.13 do not take it.
+_DECONTAM_ARG = "decontamination_ngrams_path"
+
+
+def _redact(text: str, secret: str | None) -> str:
+    """``text`` with the endpoint key replaced, before it reaches a note or the audit
+    record."""
+    return text.replace(secret, "[redacted]") if secret else text
 
 
 def _metric_name(raw: str) -> str:
@@ -247,13 +260,19 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
                 api_key=api_key, **kw,
             )
         except ImportError as e:
-            return self._stub(inp, f"harness unavailable ([harness] extra): {e}", preset=preset_name)
+            return self._stub(inp, _redact(f"harness unavailable ([harness] extra): {e}", api_key),
+                              preset=preset_name)
+        except harness.HarnessRefusal as e:
+            return self._stub(inp, _redact(f"refused: {e}", api_key), preset=preset_name)
         except Exception as e:  # noqa: BLE001 — a harness failure must not break the pipeline
-            return self._stub(inp, f"harness failed: {e}", preset=preset_name)
+            # an endpoint error can echo the request's Authorization header
+            return self._stub(inp, _redact(f"harness failed: {e}", api_key), preset=preset_name)
         elapsed = round(time.monotonic() - started, 3)
 
         ctx.report.stage("score", percent=90)
         results = results or {}
+        dropped = [a for a in (results.get(harness.DROPPED_KEY) or []) if isinstance(a, str)]
+        lm_eval_version = str(results.get(harness.VERSION_KEY) or "?")
         aggregate = _rows_from_results(results, grader="lm-eval")
         per_case = _rows_from_samples(results, grader="lm-eval")
 
@@ -270,15 +289,27 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
         decontaminated = any(r.decontaminated for r in rows)
         cost = round(sum(r.cost_usd for r in per_case), 6)
 
-        note = ""
+        notes: list[str] = []
         if not metrics:
-            note = "harness ran but produced no scalar metrics"
+            notes.append("harness ran but produced no scalar metrics")
         elif inp.decontaminate and not decontaminated:
-            note = (
-                "decontamination was requested but no `_decontaminate` metric came back — "
-                f"the tasks {tasks!r} do not implement should_decontaminate, so these scores "
-                "are NOT decontaminated"
-            )
+            if _DECONTAM_ARG in dropped:
+                notes.append(
+                    f"decontamination was requested but lm-eval {lm_eval_version} takes no "
+                    "decontamination argument, so it was not passed: these scores are NOT "
+                    "decontaminated"
+                )
+            else:
+                notes.append(
+                    "decontamination was requested but no `_decontaminate` metric came back — "
+                    f"the tasks {tasks!r} do not implement should_decontaminate, so these scores "
+                    "are NOT decontaminated"
+                )
+        other = [a for a in dropped if a != _DECONTAM_ARG]
+        if other:
+            notes.append(f"not passed (lm-eval {lm_eval_version} does not take them): "
+                         + ", ".join(other))
+        note = "; ".join(notes)
 
         ctx.report.scalars(tasks_run=len(tasks), cases=len(per_case), cost_usd=cost)
         return LmEvalOutput(

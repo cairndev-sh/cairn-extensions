@@ -29,7 +29,7 @@ cairn doctor && cairn pack check
 
 | Extra | What it is for |
 |---|---|
-| `harness` | `lm-eval>=0.4.4`, the harness itself. Heavy (torch, datasets): install it only where benchmarks run. |
+| `harness` | `lm-eval>=0.4.10,<0.5`, the harness itself: the releases the pack's harness seam was read against (they take an explicit request header, so the endpoint key never comes from the process environment). Heavy (torch, datasets): install it only where benchmarks run. It downloads task datasets into the Hugging Face cache. |
 
 The base install pins `cairndev>=0.3.1,<0.4`.
 

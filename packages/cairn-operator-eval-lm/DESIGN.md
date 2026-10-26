@@ -48,7 +48,25 @@ themselves (lm-eval 0.4.13 `models/api_models.py` 689, 831), which fails on a
 thread already running a loop. **Cancel:** a thread cannot be killed. A cancel
 stops the operator waiting; the harness call runs on to its end in the background,
 still sending requests to the endpoint, and its result is discarded. That is why
-the manifest says `supports_cancel = false`.
+the manifest says `supports_cancel = false`. `asyncio.to_thread` uses the loop's
+default executor, so a long or cancelled harness call holds one of its worker slots
+until it finishes; enough concurrent benchmarks can fill that pool and delay
+everything else in the process that uses it.
+
+**The installed release.** The `[harness]` extra is bounded to `lm-eval>=0.4.10,<0.5`,
+the releases the seam was read against (`harness.py` cites 0.4.13's lines; 0.4.10 to
+0.4.12 have the same code). `header` and `auth_token` first appear in 0.4.9.2, and
+0.4.9 has neither. The seam does not rely on the bound alone:
+
+- it refuses before building the model when `simple_evaluate` does not take `limit`
+  or `num_fewshot`, because dropping `limit` would run every document of every task
+  (smoke asks for 40) and dropping `num_fewshot` changes the scores;
+- after building the model, it refuses unless the model's effective `header` is the
+  one it passed. A release that ignored `header` would send `OPENAI_API_KEY` from the
+  process environment, and `TemplateAPI.__init__` swallows unknown keyword arguments
+  silently;
+- any other argument the release does not take is dropped and named in the run's
+  `note`. On 0.4.10-0.4.13 that includes the decontamination argument.
 
 ```
 preset (pack data, TOML)
@@ -113,7 +131,7 @@ contaminated number a gate is thresholding.
 | `tasks` | `input_schema` | run | `[]` | explicit lm-eval task ids, overriding the preset |
 | `limit` / `num_fewshot` / `batch_size` | `input_schema` | run | preset's | per-run overrides of the preset |
 | `endpoint_url` / `model` / `tokenizer` | `input_schema` | run | — | the served candidate |
-| `api_key_env` | `input_schema` | run | `""` | env var read through `ctx.secrets`; never placed in `model_args` |
+| `api_key_env` | `input_schema` | run | `""` | the NAME of a secret read through `ctx.secrets` (declared in the binding's `secrets:`), not an environment variable; the key goes to the harness call as a header, never into `os.environ` or `model_args` |
 | `decontaminate` | `input_schema` | run | `true` | request the 13-gram check |
 | `max_cost_usd_per_case` | `input_schema` | run | `0` | per-document cost ceiling; **raises** |
 | `max_latency_ms_per_case` | `input_schema` | run | `0` | per-document latency ceiling; **raises** |
@@ -171,9 +189,13 @@ those are contract, not policy.
 |---|---|---|---|
 | `checked=false`, note "harness unavailable ([harness] extra)" | `lm-eval` not installed | stub, no metrics | yes — no score to pass on |
 | `checked=false`, note "no endpoint_url" | the serve leg did not run / was not wired | stub, no metrics | yes |
-| `checked=false`, note "harness failed: …" | endpoint down, auth, task id typo | stub, no metrics | yes |
+| `checked=false`, note "harness failed: …" (the key, if the error echoed it, replaced by `[redacted]`) | endpoint down, auth, task id typo | stub, no metrics | yes |
+| `checked=false`, note "refused: lm-eval X's simple_evaluate does not take limit" (or `num_fewshot`) | an lm-eval outside the bounded `[harness]` range | stub, no metrics, the model not built, no request sent | yes |
+| `checked=false`, note "refused: lm-eval X built the model with a request header other than the one passed …" | a release that ignores `header` (it would send `OPENAI_API_KEY` from the environment) | stub, no metrics; only construction's remote-tokenizer probe (authenticated with `auth_token` alone) ran | yes |
+| `checked=true`, note "not passed (lm-eval X does not take them): …" | the release does not take some other argument | real scores, the dropped arguments named | reported, not hidden |
 | `checked=false`, note "api_key_env '…' names a key this run cannot read …" | the binding does not declare the key, or no connection supplies it | stub, no metrics, no request sent | yes |
-| `checked=true`, `decontaminated=false`, note naming the tasks | decontamination requested but no task implements it | real scores, flagged | reported, not hidden |
+| `checked=true`, `decontaminated=false`, note "… takes no decontamination argument, so it was not passed …" | decontamination requested, and the installed lm-eval (every release in the `[harness]` range) takes no decontamination argument | real scores, flagged | reported, not hidden |
+| `checked=true`, `decontaminated=false`, note naming the tasks | decontamination requested and passed, but no task implements it | real scores, flagged | reported, not hidden |
 | `EvalBudgetExceeded` raised out of the leg | a document broke a per-case or total ceiling | exception | yes — a blown budget is not a result |
 | every default run returned "harness failed: … unexpected keyword argument 'decontamination_ngrams_path'" | the seam passed a decontamination argument that lm-eval 0.4.13's `simple_evaluate` does not take (`evaluator.py` 55-87) | fixed: the seam passes only the arguments the installed `simple_evaluate` accepts; the dropped request shows as the "not decontaminated" note | — |
 | a tenant's key could reach another tenant's endpoint | the key was written to the process-wide `OPENAI_API_KEY` with `setdefault`, so the first run's key stuck for every later run | fixed: explicit per-call headers, the environment untouched (`test_two_runs_with_different_keys_do_not_leak_into_each_other`) | — |
@@ -182,8 +204,8 @@ those are contract, not policy.
 | a standard error appeared as a metric | `_DROP_SUFFIXES` checked against the raw key instead of the metric name — lm-eval spells it `exact_match_stderr,strict-match`, filter suffix LAST (caught while building the pack, held by `test_stderr_and_alias_keys_never_become_metrics`) | fixed: the check runs on the parsed metric name | — |
 
 Known unknowns for the first live run, recorded rather than guessed: lm-eval
-0.4.13 (read, not run) takes no decontamination argument in `simple_evaluate`, so
-on that release the request is dropped and the scores are reported as not
+0.4.10-0.4.13 (read, not run) take no decontamination argument in
+`simple_evaluate`, so the request is dropped and the note says the scores are not
 decontaminated; how decontamination is requested on the installed release (if at
 all) must be checked before decontaminated numbers are claimed. The header and
 model-construction path above is read from 0.4.13's source, not run. Nothing in
@@ -224,3 +246,4 @@ it runs after the wheel is installed (`test_wheels.sh` does both).
 | 2026-09-06 | Pack created: `eval/lm-eval`, presets as pack data, decontamination reporting, evaluation budget | an internal issue |
 | 2026-10-26 | Moved public to `cairndev-sh/cairn-extensions` as its first release, 0.1.0. The operator ref, schemas, presets, risk class, capability and reports are unchanged; `[pack].name` is the distribution name (was a legacy name) and `[pack].kind` is `operator` (was `service_provider`, which is for substrate services; an operator pack's kind is what the repository's manifest check selects); `[compat]` and the `cairndev` pin are bounded to `>=0.3.1,<0.4`; private issue and document references are rewritten as plain text. No contract wheel: the operator implements no shared contract. `docs/sft-integration.md` proposes running the benchmarks on the `finetune/sft` GPU box. | |
 | 2026-10-26 | Review fixes before the first release: the endpoint key goes to the harness call as an explicit header, never `os.environ` (ADR-0143 D3), and a named key the run cannot read is a refusal; the harness runs in a worker thread (ADR-0125); the seam drops arguments the installed `simple_evaluate` does not take (0.4.13 has no decontamination argument); a case's cost is counted once. Read against lm-eval 0.4.13's source; no contract change. | |
+| 2026-10-26 | Second review: `[harness]` bounded to `lm-eval>=0.4.10,<0.5` (the releases read); the seam refuses when the installed `simple_evaluate` does not take `limit` or `num_fewshot`, and refuses when the built model's effective header is not the one passed; other dropped arguments, including the decontamination request, are named in the note; the key is redacted from failure notes. No contract change. | |

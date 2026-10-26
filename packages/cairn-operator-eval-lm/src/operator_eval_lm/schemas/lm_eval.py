@@ -42,7 +42,11 @@ class LmEvalInput(BaseModel):
         "cairn-model", description="The `model` id to request (vLLM's served_model_name)."
     )
     api_key_env: str = Field(
-        "", description="Env var holding the endpoint's bearer key. Preferred over an inline key."
+        "",
+        description="NAME of the secret holding the endpoint's bearer key, read through "
+                    "ctx.secrets (the binding must declare it in `secrets:`); not an environment "
+                    "variable, and there is no inline key field. Empty = call the endpoint "
+                    "without a key.",
     )
     num_concurrent: int = Field(
         4, gt=0, description="Requests in flight; the server owns the real batching."
@@ -80,8 +84,9 @@ class LmEvalInput(BaseModel):
     )
     decontamination_ngrams_path: str = Field(
         "",
-        description="Path to the 13-gram overlap index the harness reads. Empty + decontaminate "
-                    "still requests it; the harness decides what it can do.",
+        description="Path to a 13-gram overlap index, passed to lm-eval only when the installed "
+                    "release takes a decontamination argument. lm-eval 0.4.10-0.4.13 take none, so "
+                    "it is not read there and the output says the scores are not decontaminated.",
     )
 
     # ── the budget, not an estimate (ADR-0102 D5) ────────────────────────
