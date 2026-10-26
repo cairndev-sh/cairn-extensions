@@ -11,7 +11,7 @@
 
 [pack]
 name        = "finetune"
-version     = "0.1.0"
+version     = "0.1.1"
 description = "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person."
 tags = [
     "domain:modelops",
@@ -23,4 +23,4 @@ publisher   = "cairn"
 trust_level = "official"
 
 [compat]
-cairn_engine = ">=0.2.1,<0.4"
+cairn_engine = ">=0.3.1,<0.4"

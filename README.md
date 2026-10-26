@@ -31,12 +31,13 @@ The engine, the builtin operator packs and the core contracts live in
 | Domain pack | What | Stages from |
 |---|---|---|
 | [`cairn-pack-dataset-prep`](packs/cairn-pack-dataset-prep/README.md) | `dataset-prep/prepare`: pin a source, audit it, split it by group and register `train`, `val` and `test` versions with their roles | `cairn-operator-dataset-checks` |
-| [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, three approvals and a governed tag; the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training` |
+| [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, three approvals and a governed tag, starting its GPU box after approval and stopping it on every outcome; the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training` |
 
 ## Install
 
 Every operator and domain pack requires `cairndev` 0.2.x or 0.3.x (`cairndev>=0.2.0,<0.4`;
-`>=0.2.1` for `cairn-operator-dataset-checks` and the domain packs); the contract wheels depend on
+`>=0.2.1` for `cairn-operator-dataset-checks` and `cairn-pack-dataset-prep`, `>=0.3.1` for
+`cairn-pack-finetune`, which starts and stops its GPU box); the contract wheels depend on
 nothing. CI proves each wheel on the newest released `cairndev` its pins select. Once published, each installs by name:
 
 ```bash

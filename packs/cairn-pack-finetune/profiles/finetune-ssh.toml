@@ -2,17 +2,19 @@
 # control plane on another machine (cairn-extensions#7). Not yet proven end to end: the
 # qualification run is cairn-extensions#9. The pack README's "Run it" walks through every step.
 #
-# The control plane (runs the engine, the data leg and the gates; no torch):
+# The control plane (runs the engine, the data leg and the gates, and starts and stops the box;
+# no torch). cairn-pack-finetune 0.1.1 needs cairndev 0.3.1 or later (compute/acquire,
+# compute/release and the GPU estimate):
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
-#     cairn ls finetune                                 # cairndev 0.3.0: this file's installed path
+#     cairn ls finetune                                 # this file's installed path
 #     export CAIRN_PROFILE=<this file>
 #     export CAIRN_STORAGE=sqlite:///$HOME/.cairn/train.db   # or postgres://… ('cairndev[storage-postgres]')
 #     export CAIRN_ARTIFACT_S3_BUCKET=<bucket>          # the registered versions (CAIRN_ARTIFACT_S3_PREFIX optional)
 #     export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"     # in the engine's environment
-#     export SSH_PRIVATE_KEY="$GPU_SSH_KEY"             # cairndev 0.2.1 only; see "SSH key" below
 #     cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
-#         --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY
+#         --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY \
+#         --set instance_id=<i-…> --set region=<aws-region> --set hourly_usd=<rate>
 #     cairn doctor --strict && cairn pipeline explain finetune/sft
 #
 # The GPU box (runs `cairn-dataflow-run` and the trainer only; no engine, no worker):
@@ -21,33 +23,39 @@
 #     # and the same cairn-contracts-training* versions as the control plane (the engine checks
 #     # the flow's stages against the control plane's registry; the box must run the same ones)
 #
-# The packages are not on PyPI yet: until they are, install them from a checkout of
-# cairn-extensions (`pip install ./packages/… ./packs/…`).
+# To run unreleased changes, install from a checkout of cairn-extensions instead
+# (`pip install ./packages/… ./packs/…`).
 #
+#   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after `train`
+#     and again, as a finalizer, on every outcome (`compute/release`). The connection must name an
+#     EC2 instance (`instance_id`, `region`; an Elastic IP keeps `host` stable across a stop), and
+#     the control plane needs boto3 (cairn-pack-dataset-prep brings it) and AWS credentials that
+#     allow ec2:DescribeInstances, ec2:CreateTags, ec2:StartInstances and ec2:StopInstances on it.
+#     `sft`'s `compute_connection` input must be this profile's `ml_target` (`gpu`, its default).
+#   * `hourly_usd` prices the ml legs: the launch is refused before any record when a leg has no
+#     timeout or the worst case does not fit the budget; `approve-run` shows the estimate.
 #   * Durability: without CAIRN_STORAGE (SQLite or Postgres) runs live in memory and are lost on
 #     restart. CAIRN_RUNTIME=dbos ('cairndev[runtime-dbos]') resumes a run at the next boot. Not
-#     CAIRN_RUNTIME=temporal: `sft` has a task leg (`promote`), which the Temporal owner does not
-#     run; cairndev 0.3.0 refuses that launch before any record, 0.2.1 fails the leg mid-run.
+#     CAIRN_RUNTIME=temporal: `sft` has task legs (`acquire`, `promote`, the releases), which the
+#     Temporal owner does not run, and a finalizer; the launch is refused before any record.
 #   * Venv mode only: there is no published trainer image with this pack's trainer yet, so this
 #     profile pins `remote_exec_mode = "venv"` (the box's own virtualenv, not a container).
 #   * `cairn-dataflow-run` must be on the box's non-interactive SSH PATH; otherwise set
 #     CAIRN_DATAFLOW_REMOTE_CMD on the control plane to its full path (e.g. <venv>/bin/cairn-dataflow-run).
-#   * SSH key: with cairndev 0.2.1, cancel and the engine's stage-checkpoint relay (the pull of
-#     the leg's `checkpoints/stage-*` back to the control plane) read SSH_PRIVATE_KEY from the
-#     control plane's environment, not the connection's PRIVATE_KEY. From cairndev 0.3.0 both use
-#     the connection's PRIVATE_KEY (`--secret PRIVATE_KEY=…` above), and SSH_PRIVATE_KEY is needed
-#     only for jobs started before the upgrade. This is not the trainer's own checkpoints, which
-#     go to S3 (below).
+#   * SSH key: cancel and the engine's stage-checkpoint relay (the pull of the leg's
+#     `checkpoints/stage-*` back to the control plane) use the connection's PRIVATE_KEY
+#     (`--secret PRIVATE_KEY=…` above). SSH_PRIVATE_KEY in the control plane's environment is
+#     needed only for a job started under cairndev 0.2.1. This is not the trainer's own
+#     checkpoints, which go to S3 (below).
 #   * The box reads the dataset versions from the artifact bucket (CAIRN_ARTIFACT_S3_BUCKET), so
 #     its credentials (e.g. an instance role) need read access there, and write access to
 #     CAIRN_CHECKPOINT_BUCKET. Credentials stay on the box.
 #   * The trainer reads CAIRN_CHECKPOINT_BUCKET (checkpoints and the `artifact_target: s3`
 #     adapter), CAIRN_CHECKPOINT_PREFIX and AWS_DEFAULT_REGION where it runs; for MinIO or
 #     another S3-compatible store it reads AWS_ENDPOINT_URL (not CAIRN_ARTIFACT_S3_ENDPOINT).
-#     Set them on the GPU box, or, from cairndev 0.3.0, set them on the control plane and
-#     uncomment `remote_env` below: the SSH engine forwards each named variable that is set, and
-#     refuses a name containing KEY, SECRET, TOKEN or PASSWORD. Leave it commented on 0.2.1,
-#     which does not know the key.
+#     Set them on the GPU box, or set them on the control plane and uncomment `remote_env`
+#     below: the SSH engine forwards each named variable that is set, and refuses a name
+#     containing KEY, SECRET, TOKEN or PASSWORD.
 #   * The `sft` smoke and train legs retry once after their process is killed, and the trainer
 #     resumes from the run's checkpoints in CAIRN_CHECKPOINT_BUCKET; without that bucket a retry
 #     starts again from step 0.
@@ -57,8 +65,10 @@
 #
 # Two machines need a store both can reach, so this profile selects the s3 artifact store: the
 # versions dataset-prep registers (it refuses to register from the local store) and the adapter
-# (`artifact_target: s3`) cross through it. Running everything on one machine needs none of the
-# ssh settings: use the default profile, with the s3 store for dataset-prep's versions.
+# (`artifact_target: s3`) cross through it. `sft` starts and stops the box it trains on, so it
+# does not run on one machine as it is: there, use a copy of the pipeline without `acquire`,
+# `release-box` and `release`, with the default profile and the s3 store for dataset-prep's
+# versions.
 
 [profile]
 visibility = "public"
@@ -69,5 +79,5 @@ ml_engine        = "builtin"  # the sft-train flow, dispatched to ml_target
 ml_target        = "gpu"      # the compute.ssh connection named `gpu`
 remote_exec_mode = "venv"     # the box's virtualenv: no published image carries this trainer yet
 artifact_store   = "s3"       # the versions and registered files cross machines through S3
-# cairndev 0.3.0 and later: forward these from the control plane to the job on the box.
+# Uncomment to forward these from the control plane to the job on the box.
 # remote_env     = "CAIRN_CHECKPOINT_BUCKET,CAIRN_CHECKPOINT_PREFIX,AWS_DEFAULT_REGION"
