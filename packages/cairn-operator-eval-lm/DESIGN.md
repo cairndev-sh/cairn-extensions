@@ -53,7 +53,7 @@ default executor, so a long or cancelled harness call holds one of its worker sl
 until it finishes; enough concurrent benchmarks can fill that pool and delay
 everything else in the process that uses it.
 
-**The installed release.** The `[harness]` extra is bounded to `lm-eval>=0.4.10,<0.5`,
+**The installed release.** The `[harness]` extra is bounded to `lm-eval>=0.4.10,<0.4.14`,
 the releases the seam was read against (`harness.py` cites 0.4.13's lines; 0.4.10 to
 0.4.12 have the same code). `header` and `auth_token` first appear in 0.4.9.2, and
 0.4.9 has neither. The seam does not rely on the bound alone:
@@ -247,3 +247,4 @@ it runs after the wheel is installed (`test_wheels.sh` does both).
 | 2026-10-26 | Moved public to `cairndev-sh/cairn-extensions` as its first release, 0.1.0. The operator ref, schemas, presets, risk class, capability and reports are unchanged; `[pack].name` is the distribution name (was a legacy name) and `[pack].kind` is `operator` (was `service_provider`, which is for substrate services; an operator pack's kind is what the repository's manifest check selects); `[compat]` and the `cairndev` pin are bounded to `>=0.3.1,<0.4`; private issue and document references are rewritten as plain text. No contract wheel: the operator implements no shared contract. `docs/sft-integration.md` proposes running the benchmarks on the `finetune/sft` GPU box. | |
 | 2026-10-26 | Review fixes before the first release: the endpoint key goes to the harness call as an explicit header, never `os.environ` (ADR-0143 D3), and a named key the run cannot read is a refusal; the harness runs in a worker thread (ADR-0125); the seam drops arguments the installed `simple_evaluate` does not take (0.4.13 has no decontamination argument); a case's cost is counted once. Read against lm-eval 0.4.13's source; no contract change. | |
 | 2026-10-26 | Second review: `[harness]` bounded to `lm-eval>=0.4.10,<0.5` (the releases read); the seam refuses when the installed `simple_evaluate` does not take `limit` or `num_fewshot`, and refuses when the built model's effective header is not the one passed; other dropped arguments, including the decontamination request, are named in the note; the key is redacted from failure notes. No contract change. | |
+| 2026-10-26 | Third review: `[harness]` capped at `<0.4.14` (the releases whose source was read: 0.4.10–0.4.13). The tokenizer probe during construction authenticates only with the run's own key, or with none (`openai_completions.py:35`, `utils.py:873-874` in 0.4.13); a later release is admitted only after its source is read the same way. | |

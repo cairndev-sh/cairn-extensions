@@ -519,4 +519,4 @@ def test_the_harness_extra_is_bounded_to_the_releases_read():
     from pathlib import Path
 
     project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    assert project["project"]["optional-dependencies"]["harness"] == ["lm-eval>=0.4.10,<0.5"]
+    assert project["project"]["optional-dependencies"]["harness"] == ["lm-eval>=0.4.10,<0.4.14"]

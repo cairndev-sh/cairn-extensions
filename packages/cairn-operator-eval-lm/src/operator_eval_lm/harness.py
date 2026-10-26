@@ -15,7 +15,7 @@ own, :data:`DROPPED_KEY` and :data:`VERSION_KEY`, so the operator can say on the
 record what was not passed.
 
 The ``[harness]`` extra is bounded to the releases this seam was read against:
-``lm-eval>=0.4.10,<0.5``. Line numbers below are 0.4.13's; 0.4.10, 0.4.11 and 0.4.12
+``lm-eval>=0.4.10,<0.4.14``. Line numbers below are 0.4.13's; 0.4.10, 0.4.11 and 0.4.12
 have the same code at nearby lines. ``header``/``auth_token`` first appear in
 0.4.9.2, and 0.4.9 has neither.
 
@@ -116,7 +116,7 @@ def run_harness(*, model: str, model_args: str, tasks: list[str], api_key: str |
         raise HarnessRefusal(
             f"lm-eval {version}'s simple_evaluate does not take {', '.join(required)}; running "
             "without it would change what the run costs or what it scores. Install a release "
-            "in the [harness] range (lm-eval>=0.4.10,<0.5)."
+            "in the [harness] range (lm-eval>=0.4.10,<0.4.14)."
         )
 
     auth = auth_kwargs(api_key)
@@ -127,7 +127,7 @@ def run_harness(*, model: str, model_args: str, tasks: list[str], api_key: str |
             f"lm-eval {version} built the model with a request header other than the one passed "
             "(it would fall back to OPENAI_API_KEY from the process environment); refusing "
             "before any benchmark request. Install a release in the [harness] range "
-            "(lm-eval>=0.4.10,<0.5)."
+            "(lm-eval>=0.4.10,<0.4.14)."
         )
     if dropped:
         logger.warning("lm-eval %s does not take %s; not passed", version, ", ".join(dropped))
