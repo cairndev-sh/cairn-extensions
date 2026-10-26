@@ -65,7 +65,7 @@ for w in "${wheels[@]+"${wheels[@]}"}"; do
 done
 if [ ${#specs[@]} -eq 0 ]; then
   echo "no wheels yet: installing the released cairndev only"
-  uv pip install -q "cairndev>=0.2.0,<0.3" pytest pytest-asyncio
+  uv pip install -q "cairndev>=0.2.0,<0.4" pytest pytest-asyncio
 else
   uv pip install -q "${specs[@]}" pytest pytest-asyncio
 fi

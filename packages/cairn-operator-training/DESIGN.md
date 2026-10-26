@@ -234,3 +234,4 @@ pack — install it before trusting them.
 | 2026-10-22 | #4: `train.qlora` implements `training.stage.train_qlora/1.1.0` (governed train/eval/test splits; batch, accumulation, checkpointing and dropout knobs; `extra` out of the configuration); `splits.py` shared by both trainers; `cairn-contracts-training-stages` 1.1.0. |
 | 2026-10-21 | One trainer, no provider clients: `train/modal`, `train/kaggle`, `train/runpod`, `train/vast`, `train/stage-dataset`, `train/teardown`, `managed_leg` and the published-image pin leave the public wheel; where a run goes is the engine's choice (ssh today). The `modal` and `kaggle` extras go with them. |
 | 2026-10-26 | #28: the stub tier keeps run-scoped checkpoints in `CAIRN_CHECKPOINT_BUCKET` and resumes from them, so the `sft` retry is proven on the stub |
+| 2026-10-26 | `cairndev>=0.2.0,<0.4` and `[compat]` to match: proven on cairndev 0.3.0 before the first PyPI release, so a 0.3 install is not downgraded |
