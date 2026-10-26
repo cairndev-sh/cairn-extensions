@@ -1,7 +1,8 @@
 """Schemas for ``eval/lm-eval`` — classic benchmarks on a served candidate.
 
-The shape difference from the older ``eval/benchmark`` (which loads a base model
-+ LoRA adapter in-process on a GPU) is deliberate and is the reason this is a
+The shape difference from an in-process benchmark (``eval/benchmark``, one of
+cairn's platform operators, not public; it loads a base model + LoRA adapter on a
+GPU) is deliberate and is the reason this is a
 separate operator rather than another flag on that one: here the candidate is
 ALREADY SERVED — an OpenAI-compatible endpoint such as a vLLM server — so the
 work is HTTP, not CUDA, the operator needs no GPU of its own, and the numbers
@@ -140,8 +141,9 @@ class LmEvalOutput(BaseModel):
     )
     metrics: dict[str, float] = Field(
         default_factory=dict,
-        description="Flat {task/metric: value} — the shape model/gate.benchmark_metrics and "
-                    "eval/delta already consume, DERIVED from the scorecard.",
+        description="Flat {task/metric: value}, DERIVED from the scorecard — the shape a gate "
+                    "reads (a pipeline predicate, or a gate operator such as the platform's "
+                    "model/gate or eval/delta, which are not public).",
     )
     directions: dict[str, str] = Field(
         default_factory=dict, description="{task/metric: higher_better|lower_better}."

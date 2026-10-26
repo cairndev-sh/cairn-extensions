@@ -14,13 +14,17 @@ What is proven:
   reaches the scorecard (the ticket's acceptance);
 * decontamination requested but NOT produced is REPORTED, never hidden;
 * per-case cost/latency budgets fail loudly;
-* the flat metric map + directions land in the shape ``model/gate`` /
-  ``eval/delta`` already consume.
+* the flat metric map + directions land in the shape a gate reads (a pipeline
+  predicate, or the platform's ``model/gate`` / ``eval/delta``, which are not public);
+* the endpoint key reaches the harness call only, never the process environment;
+* the harness runs off the event loop.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+import time
 
 import pytest
 
@@ -214,3 +218,209 @@ def test_mock_produces_no_scores_a_gate_could_pass_on():
 
 def test_disabled_is_the_default():
     assert LmEvalInput().enabled is False
+
+
+# ── the endpoint key never touches the process environment (ADR-0143 D3) ──
+
+
+def _run_with(inp: LmEvalInput, **kw):
+    return asyncio.run(run_operator_for_test(LmEvalOp, inp.model_dump(), **kw))
+
+
+def _recording(seen: list):
+    """A fake harness that records the key it was handed and what the process
+    environment held while it ran."""
+    def _fake(**kw):
+        seen.append({"api_key": kw.get("api_key"), "env": os.environ.get("OPENAI_API_KEY"),
+                     "model_args": kw.get("model_args", "")})
+        return _fake_results()
+    return _fake
+
+
+def test_the_key_reaches_the_harness_call_and_never_the_process_env(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    before = dict(os.environ)
+    seen: list = []
+    monkeypatch.setattr(harness, "run_harness", _recording(seen))
+    out = _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-a"})
+    assert out.checked is True
+    assert seen[0]["api_key"] == "sk-tenant-a"
+    assert seen[0]["env"] is None, "the key was written to the shared process environment"
+    assert "sk-tenant-a" not in seen[0]["model_args"]
+    assert dict(os.environ) == before
+
+
+def test_two_runs_with_different_keys_do_not_leak_into_each_other(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    seen: list = []
+    monkeypatch.setattr(harness, "run_harness", _recording(seen))
+    _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-a"})
+    _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-b"})
+    assert [s["api_key"] for s in seen] == ["sk-tenant-a", "sk-tenant-b"]
+    assert [s["env"] for s in seen] == [None, None]
+    assert "OPENAI_API_KEY" not in os.environ
+
+
+def test_a_deployment_key_in_the_environment_is_not_the_tenants_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-deployment")
+    seen: list = []
+    monkeypatch.setattr(harness, "run_harness", _recording(seen))
+    _run_with(_served(api_key_env="EP_KEY"), secrets={"EP_KEY": "sk-tenant-a"})
+    assert seen[0]["api_key"] == "sk-tenant-a"
+    assert os.environ["OPENAI_API_KEY"] == "sk-deployment"
+
+
+def test_no_api_key_env_hands_the_harness_no_key(monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(harness, "run_harness", _recording(seen))
+    _run(_served())
+    assert seen[0]["api_key"] is None
+
+
+@pytest.mark.parametrize("secrets", [None, {"SOMETHING_ELSE": "x"}])
+def test_a_named_key_the_run_cannot_read_is_a_refusal_not_an_unauthenticated_call(monkeypatch, secrets):
+    called: list = []
+    monkeypatch.setattr(harness, "run_harness", lambda **kw: called.append(kw) or _fake_results())
+    out = _run_with(_served(api_key_env="EP_KEY"), secrets=secrets)
+    assert out.checked is False and out.metrics == {}
+    assert "EP_KEY" in out.note and "secrets" in out.note
+    assert called == [], "the endpoint was called without the key the run named"
+
+
+def test_the_harness_seam_builds_explicit_headers_so_lm_eval_never_reads_the_env():
+    """lm-eval's local-completions sends ``Bearer $OPENAI_API_KEY`` unless the LM is
+    built with an explicit, non-empty ``header`` (lm_eval 0.4.13
+    models/api_models.py:322-324, models/openai_completions.py:139-140)."""
+    with_key = harness.auth_kwargs("sk-a")
+    assert with_key["header"]["Authorization"] == "Bearer sk-a"
+    assert with_key["auth_token"] == "sk-a"
+    without = harness.auth_kwargs(None)
+    assert without["header"] and "Authorization" not in without["header"]
+    assert "auth_token" not in without
+
+
+def test_the_seam_drops_arguments_the_installed_simple_evaluate_does_not_take():
+    """lm-eval 0.4.13's simple_evaluate has no decontamination argument; passing it
+    raised TypeError and every default (decontaminate=true) run became a stub."""
+    def simple_evaluate(model, tasks=None, limit=None, num_fewshot=None):
+        return {}
+
+    kept, dropped = harness.accepted_kwargs(
+        simple_evaluate, {"limit": 4, "num_fewshot": 0, "decontamination_ngrams_path": None})
+    assert kept == {"limit": 4, "num_fewshot": 0}
+    assert dropped == ["decontamination_ngrams_path"]
+
+
+# ── the harness runs off the event loop (ADR-0125) ──────────────────────
+
+
+def test_the_event_loop_stays_responsive_while_the_harness_runs(monkeypatch):
+    """lm-eval is synchronous and long, and its API backends call ``asyncio.run``
+    (lm_eval 0.4.13 models/api_models.py:689, :831), which fails inside a running
+    loop. The operator must hand it to a worker thread."""
+    def _slow(**kw):
+        time.sleep(0.5)
+        return _fake_results()
+
+    monkeypatch.setattr(harness, "run_harness", _slow)
+
+    async def _both():
+        ticks = 0
+
+        async def _ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        t = asyncio.create_task(_ticker())
+        out = await run_operator_for_test(LmEvalOp, _served())
+        t.cancel()
+        return out, ticks
+
+    out, ticks = asyncio.run(_both())
+    assert out.checked is True
+    assert ticks >= 10, f"the loop was blocked while the harness ran ({ticks} ticks in 0.5 s)"
+
+
+def test_the_harness_does_not_run_on_the_event_loop_thread(monkeypatch):
+    seen: dict = {}
+
+    def _where(**kw):
+        try:
+            asyncio.get_running_loop()
+            seen["loop"] = True
+        except RuntimeError:
+            seen["loop"] = False
+        return _fake_results()
+
+    monkeypatch.setattr(harness, "run_harness", _where)
+    _run(_served())
+    assert seen["loop"] is False
+
+
+# ── cost is counted once per case ───────────────────────────────────────
+
+
+def test_a_case_with_several_metrics_is_costed_once(monkeypatch):
+    def _two_metrics(**kw):
+        r = _fake_results()
+        r["samples"] = {"gsm8k": [
+            {"doc_id": 0, "exact_match": 1.0, "acc": 1.0, "cost_usd": 0.5, "latency_ms": 10.0},
+        ]}
+        return r
+
+    monkeypatch.setattr(harness, "run_harness", _two_metrics)
+    out = _run(_served(max_total_cost_usd=0.6))
+    assert out.cost_usd == pytest.approx(0.5)
+    assert out.cases == 2  # per-case rows, one per metric
+
+
+# ── the cheap no-op paths ───────────────────────────────────────────────
+
+
+def test_disabled_and_dry_run_never_call_the_harness(monkeypatch):
+    monkeypatch.setattr(harness, "run_harness", lambda **kw: pytest.fail("harness called"))
+    assert _run(LmEvalInput(endpoint_url="http://candidate.example:8000/v1")).checked is False
+    out = _run(_served(dry_run=True))
+    assert out.checked is False and "dry-run" in out.note
+
+
+def test_run_harness_builds_the_model_with_the_key_as_a_header(monkeypatch):
+    """The seam against a stand-in ``lm_eval`` shaped like 0.4.13's API: the model is
+    built through the registry with the explicit header, ``simple_evaluate`` gets the
+    model object (never the key in ``model_args``), and an argument it does not take
+    is dropped. The stand-in is removed again, so nothing else sees an ``lm_eval``."""
+    import types
+
+    built: dict = {}
+    called: dict = {}
+
+    class _Model:
+        @classmethod
+        def create_from_arg_string(cls, arg_string, additional_config=None):
+            built.update(arg_string=arg_string, **(additional_config or {}))
+            return cls()
+
+    def simple_evaluate(model=None, model_args=None, tasks=None, num_fewshot=None,
+                        batch_size=None, limit=None):
+        called.update(model=model, model_args=model_args, tasks=tasks, limit=limit)
+        return _fake_results()
+
+    lm_eval = types.ModuleType("lm_eval")
+    lm_eval.simple_evaluate = simple_evaluate
+    api = types.ModuleType("lm_eval.api")
+    registry = types.ModuleType("lm_eval.api.registry")
+    registry.get_model = lambda name: _Model
+    monkeypatch.setitem(sys.modules, "lm_eval", lm_eval)
+    monkeypatch.setitem(sys.modules, "lm_eval.api", api)
+    monkeypatch.setitem(sys.modules, "lm_eval.api.registry", registry)
+
+    harness.run_harness(model="local-completions", model_args="model=m,base_url=http://x/v1",
+                        tasks=["gsm8k"], api_key="sk-a", num_fewshot=0, batch_size=8, limit=4,
+                        decontamination_ngrams_path=None)
+    assert built["header"]["Authorization"] == "Bearer sk-a"
+    assert "sk-a" not in built["arg_string"]
+    assert isinstance(called["model"], _Model) and called["model_args"] is None
+    assert called["tasks"] == ["gsm8k"] and called["limit"] == 4
+    assert "OPENAI_API_KEY" not in os.environ or os.environ["OPENAI_API_KEY"] != "sk-a"

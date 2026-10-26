@@ -4,7 +4,8 @@ The candidate is already stood up behind an OpenAI-compatible endpoint (a vLLM
 server, for example). This operator points lm-evaluation-harness at THAT endpoint —
 ``model="local-completions"`` — instead of loading a second copy of the weights.
 Three consequences worth stating, because they are the reason this is not another
-flag on ``eval/benchmark``:
+flag on an in-process benchmark (``eval/benchmark`` in cairn's platform operators,
+not public), which loads base weights + an adapter on a GPU:
 
 * **no GPU of its own.** The work is HTTP against a server someone else sized;
   ``requires_gpu = false`` is the honest declaration, and it lets a benchmark run
@@ -25,10 +26,23 @@ cost the run did not agree to, and the ADR is explicit that this is a budget and
 not an estimate. Every other failure (no extra, harness error) degrades to a
 deterministic stub with ``checked=false``, so a missing extra never breaks a
 pipeline and never emits a score a gate could pass on.
+
+The harness is synchronous and runs for minutes to hours, so ``run`` hands it to a
+worker thread (``asyncio.to_thread``) and the event loop keeps serving other runs
+(ADR-0125). Its HTTP backends also call ``asyncio.run`` themselves, which fails on
+a thread that already runs a loop. A CANCEL stops the operator waiting, but a
+thread cannot be killed: the harness call runs on to its end in the background,
+still sending requests to the endpoint, and its result is discarded
+(``supports_cancel = false`` says as much).
+
+The endpoint key (``api_key_env``, read through ``ctx.secrets``) goes to the harness
+call and nowhere else: never into ``os.environ``, which every run in the process
+shares (ADR-0143 D3), and never into ``model_args``. A named key the run cannot
+read is a refusal, not an unauthenticated call.
 """
 from __future__ import annotations
 
-import os
+import asyncio
 import time
 from typing import Any
 
@@ -121,6 +135,11 @@ def _rows_from_samples(results: dict, grader: str) -> list[ScorecardRow]:
             case = str(s.get("doc_id", i))
             cost = float(s.get("cost_usd", 0.0) or 0.0)
             latency = float(s.get("latency_ms", 0.0) or 0.0)
+            # A case's cost is carried by its FIRST metric row only: the rows are
+            # summed (cost_usd, the total ceiling), and one request scored on three
+            # metrics was paid for once. Latency is a per-case maximum, so every
+            # row keeps it.
+            costed = False
             for raw, value in s.items():
                 if raw in ("doc_id", "cost_usd", "latency_ms"):
                     continue
@@ -128,9 +147,11 @@ def _rows_from_samples(results: dict, grader: str) -> list[ScorecardRow]:
                     continue
                 rows.append(ScorecardRow(
                     metric=_metric_name(raw), value=float(value), slice=task,
-                    case=f"{task}:{case}", grader=grader, cost_usd=cost, latency_ms=latency,
+                    case=f"{task}:{case}", grader=grader,
+                    cost_usd=0.0 if costed else cost, latency_ms=latency,
                     decontaminated=is_decontaminated(_metric_name(raw)),
                 ))
+                costed = True
     return rows
 
 
@@ -149,7 +170,7 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
 
     def _stub(self, inp: LmEvalInput, note: str, *, preset: str = "") -> LmEvalOutput:
         """Deterministic no-op. Never carries metrics: a benchmark that did not
-        run must not emit a score a gate could pass on (the eval/benchmark rule)."""
+        run must not emit a score a gate could pass on."""
         return LmEvalOutput(
             checked=False, note=note, preset_used=preset,
             decontamination_requested=inp.decontaminate,
@@ -174,8 +195,9 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
             kw["limit"] = limit
         if inp.decontaminate:
             # The 13-gram overlap index. Passed even when empty so the harness
-            # sees the REQUEST; DESIGN.md §6 records that the exact spelling must
-            # be checked against the installed release before the first live run.
+            # sees the REQUEST. A release whose simple_evaluate does not take it
+            # (0.4.13 does not) gets it dropped by the seam, and the output says
+            # the scores are not decontaminated (DESIGN.md §6).
             kw["decontamination_ngrams_path"] = inp.decontamination_ngrams_path or None
         return tasks, name, kw
 
@@ -195,19 +217,34 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
         tasks, preset_name, kw = self._resolve(inp)
         if not tasks:
             return self._stub(inp, "no tasks resolved — nothing to evaluate", preset=preset_name)
+        api_key: str | None = None
         if inp.api_key_env:
-            # lm-eval's OpenAI-compatible backend reads the key from the
-            # environment; the operator never puts a secret in model_args, where
-            # it would land in the recorded `parameters` event.
-            key = ctx.secrets.get(inp.api_key_env) if getattr(ctx, "secrets", None) else None
-            if key:
-                os.environ.setdefault("OPENAI_API_KEY", key)
+            # The key goes to the harness call only — never os.environ (shared by
+            # every run in this process; ADR-0143 D3) and never model_args (logged
+            # and copied into lm-eval's results). See harness.py.
+            refusal = (
+                f"api_key_env {inp.api_key_env!r} names a key this run cannot read; declare it "
+                "in the binding's `secrets:` block (and supply it from a connection). Refusing "
+                "rather than calling the endpoint without its key."
+            )
+            secrets = getattr(ctx, "secrets", None)
+            if secrets is None:
+                return self._stub(inp, refusal, preset=preset_name)
+            try:
+                api_key = secrets.get(inp.api_key_env)
+            except KeyError as e:
+                return self._stub(inp, f"{refusal} ({e})", preset=preset_name)
+            if not api_key:
+                return self._stub(inp, refusal, preset=preset_name)
 
         ctx.report.stage("evaluate", percent=10)
         started = time.monotonic()
         try:
-            results = harness.run_harness(
-                model="local-completions", model_args=_model_args(inp), tasks=tasks, **kw
+            # Off the event loop (ADR-0125): the harness is synchronous and long.
+            results = await asyncio.to_thread(
+                harness.run_harness,
+                model="local-completions", model_args=_model_args(inp), tasks=tasks,
+                api_key=api_key, **kw,
             )
         except ImportError as e:
             return self._stub(inp, f"harness unavailable ([harness] extra): {e}", preset=preset_name)
