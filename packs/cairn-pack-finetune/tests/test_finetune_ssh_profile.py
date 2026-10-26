@@ -81,7 +81,7 @@ def test_the_ssh_engine_accepts_the_sft_train_flow(monkeypatch):
 
 @pytest.mark.parametrize("extra,refused", [("", None), (",AWS_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY")])
 def test_the_commented_remote_env_line_is_one_the_ssh_engine_accepts(tmp_path, monkeypatch, extra, refused):
-    """cairndev 0.3.0 and later (#193): uncommented, the profile's `remote_env` line selects the three
+    """cairndev 0.3.0 and later (cairndev-sh/cairn#193): uncommented, the profile's `remote_env` line selects the three
     names, and the SSH engine accepts the `sft-train` flow with it; a credential name is refused (the
     control). Skipped on a core that has no `remote_env` (0.2.x), where the line must stay commented."""
     from cairn.core.backend_selection import selected

@@ -188,7 +188,7 @@ class _Killed(BaseException):
 
 
 class _BoxEngine:
-    """An engine whose job can die the way a remote one does (cairn#552). Each submission runs the
+    """An engine whose job can die the way a remote one does (cairndev-sh/cairn#552). Each submission runs the
     flow on the core runner in a fresh job directory, as a new SSH job does, with
     `CAIRN_PARENT_RUN` set to the leg's run the way the engines stamp it. A death with no exit code
     is reported `retriable`; a stage's own error is a clean non-zero exit and is not."""

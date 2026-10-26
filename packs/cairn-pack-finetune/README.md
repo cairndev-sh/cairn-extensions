@@ -80,8 +80,8 @@ pip install 'cairndev[runtime-dbos]' && export CAIRN_RUNTIME=dbos   # optional: 
 Without `CAIRN_STORAGE` runs live in memory and are gone on restart. The schema migrates when the
 server first opens the store; upgrade every process that shares one database together. **Not
 Temporal:** `sft` has a `task:` leg (`promote`), which the Temporal pipeline owner does not run.
-From cairndev 0.3.0 the launch is refused under `CAIRN_RUNTIME=temporal` (exit 3) before any
-record exists; on 0.2.1 the leg fails mid-run. Use `inprocess` (the default) or `dbos`.
+From cairndev 0.3.0 the launch is refused under `CAIRN_RUNTIME=temporal` before any record
+exists (`cairn remote launch` exits 1 with the reason; `cairn pipeline run` exits 3); on 0.2.1 the leg fails mid-run. Use `inprocess` (the default) or `dbos`.
 `cairn dev` sets its own: SQLite at `--db` (default `~/.cairn/dev.db`) and `inprocess`.
 
 ### 3. The profile, the buckets and the box
@@ -147,16 +147,15 @@ cairn remote presets finetune/sft
 cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
 cairn remote advance <pl_id> approve-run                    # 1. before any GPU time
 cairn remote advance <pl_id> promote-model                  # 2. after `improved`, with the losses on the card
-cairn remote ps --status awaiting_approval                  # 3. artifact/promote's own approval
-cairn remote approve <run_id> --approver you@example.com    #    or: cairn remote reject <run_id>
+cairn remote advance <pl_id> promote                        # 3. artifact/promote's own approval
 ```
 
 Override any input with `-i key=value` and keep the result with `--save-preset <name>`. A `list`
 input takes JSON (`-i 'report_to=["mlflow"]'`), and from cairndev 0.3.0 a comma string as well
-(`-i report_to=mlflow`). `--watch` returns when the pipeline pauses at a gate; `approvers:
+(`-i report_to=mlflow`). `cairn remote pipeline <pl_id>` shows which step is waiting. `--watch` returns when the pipeline pauses at a gate; `approvers:
 ml-owners` names who decides, and with sign-in on the signed-in user is recorded.
 
-The launch door refuses, before any record exists (exit 3): a test version given as
+The launch door refuses, before any record exists (`cairn remote launch` exits 1 with the reason): a test version given as
 `train_version`, a train or val version without an intake verdict, training data that meets a
 registered test or golden version, and a gated base model without `-i accept_license=true`.
 
@@ -178,24 +177,25 @@ cairn replay <run_id> --source db                   # the recorded events as a t
   leg's job directory on the box (`train-output/<output_name>`), so two runs never share
   checkpoints. The published adapter is the adapter files, without the checkpoints.
 - **`smoke` and `train` declare `retry: {max_attempts: 2}`** (an ml leg otherwise gets one
-  attempt). When an attempt's process is killed (a box reboot, the OOM killer, a dropped SSH
-  session: no exit code), the engine reports it retriable and the leg runs once more under the
+  attempt). When an attempt's process dies without writing its exit code (the OOM killer, a
+  kill on the box), the engine reports it retriable and the leg runs once more under the
   same run; the trainer pulls that run's newest checkpoint from `CAIRN_CHECKPOINT_BUCKET` and
   continues from its step. A leg that fails on its own error (a clean non-zero exit) is not
-  retried. Without a checkpoint bucket the retry starts again from step 0.
+  retried, and neither is a poll that cannot reach the box. Without a checkpoint bucket the retry starts again from step 0.
 - **Budget:** `governance.budget: {usd: 25}` on the `sft` series. Each attempt reserves its own
   estimate before it is submitted, so a retry is new spend the budget must still cover, and an
   attempt the budget cannot cover fails the leg instead of starting. On cairndev 0.3.0 and
   earlier GPU time is not priced (the estimate is $0) and a failed attempt releases its hold.
-  From 0.3.1 a leg on a connection with `hourly_usd` is priced: before any record exists, the
+  From the cairndev release after 0.3.0, a leg on a connection with `hourly_usd` is priced: before any record exists, the
   launch checks `hourly_usd × timeout × 2` for each leg (30 min for `smoke`, 12 h for `train`)
   against what the series has left, about $16.50 at $0.66/h, and every attempt settles its own box
   time, failed or not. A dearer box needs a larger budget, or a copy of the pipeline with a
   shorter `timeout`.
-- **Cancel:** `cairn remote cancel-pipeline <pl_id>` (every in-flight leg) or `cairn remote
-  cancel <run_id>` (one leg). Over SSH it kills the trainer on the box: cairndev 0.2.1 needs
-  `SSH_PRIVATE_KEY` in the control plane's environment; from 0.3.0 it uses the connection's key,
-  and a cancel that cannot reach the box is reported as failed.
+- **Cancel:** `cairn remote cancel-pipeline <pl_id>` stops the pipeline: no further leg starts.
+  It does **not** yet stop a trainer already running on the box, because `sft` has no box-release
+  step (cairn-extensions#26 adds one; a cancel then kills the trainer before the box stops). Until
+  then, after a cancel stop the box yourself (your cloud console), or the trainer keeps running
+  and billing until it finishes.
 - **The box:** `cairn compute status gpu` shows whether it is up and what it costs per hour, and
   `cairn compute sweep` lists boxes whose lease expired (`--apply` stops them). You start and stop
   the box yourself (cairn-extensions#26 tracks doing it from the pipeline): stop it after a run.
@@ -219,7 +219,8 @@ What the door decided is on the pipeline record (`admission`, with `policy@<dige
 first gate's card. A check a policy names must be one the door knows; it refuses every launch
 under an unknown one, `holdout` included.
 
-**MLflow (optional):** `MLFLOW_TRACKING_URI` on the control plane with `-i report_to=mlflow`
+**MLflow (optional):** `MLFLOW_TRACKING_URI` on the control plane with
+`-i 'report_to=["mlflow"]'` (or `-i report_to=mlflow` from cairndev 0.3.0)
 records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` and must reach the
 URI. **On one machine**, use the default profile: none of the SSH settings apply, and
 dataset-prep still registers its versions through the s3 store.
