@@ -1,7 +1,29 @@
 # Proposal: lm-eval benchmarks inside `finetune/sft`, on the GPU box
 
-**Status:** proposal for review. Nothing here is implemented, and nothing in this package changes
-because of it.
+**Status:** implemented as option (b) in cairn-extensions#42 (this package 0.2.0,
+`cairn-pack-finetune` 0.2.0). The proposal below is kept as it was reviewed; where the
+implementation differs:
+
+- **The default preset** is a new `forgetting` (five log-likelihood tasks at 500 documents, MMLU at
+  10 per subject), not `smoke`: 40 documents per task cannot resolve the deltas this check exists
+  for. `forgetting-ifeval` adds IFEval for `finetune/eval-adapter`. Presets gain a per-task
+  `limits` table, and the stage makes one `simple_evaluate` call per task.
+- **`timeout: 3h`** on `sft`'s `eval` leg (the table's last row: 31 box-hours, $20.46, `max_hours:
+  32`), with a **time probe** the proposal did not have: about 50 documents first, and a clean
+  refusal when the projection does not fit (`time_budget_s`, which must equal the timeout).
+- **The held-out loss** on `val_version` and `test_version` for both models, by one named method,
+  is part of the stage.
+- **The findings** are `eval_lm_eval_base_<task>_<metric>`, `…candidate_…`, `…delta_…` and their
+  `_stderr`, `worst_delta`, `regressions`; `promote-model` shows the `acc` deltas of the six tasks
+  with their standard errors, and the split losses. Shown, not gated.
+- **The adapter** is the train leg's directory on the box (`train_qlora_local_adapter_dir`) when it
+  is still there, else its `adapter_uri` (`s3://` downloaded, `hf://` from the Hub).
+- **Box install:** `cairn-operator-eval-lm[box]` (`lm-eval[hf,ifeval]` and boto3) next to
+  `cairn-operator-training[gpu]`. Resolved together once by hand (`uv pip compile`, Linux x86-64,
+  Python 3.12, 2026-10-27): lm-eval 0.4.13 with the trainer's torch 2.11.0, transformers 5.5.0,
+  peft 0.20.0, datasets 4.3.0, accelerate 1.14.0 and bitsandbytes 0.50.1. Not yet a CI check
+  (item 1 below).
+- **No stage contract** (item 4): uncontracted, like `compress/distill`.
 
 ## The ask
 

@@ -50,7 +50,6 @@ import time
 from typing import Any
 
 from cairn.core.eval.scorecard import (
-    DECONTAM_SUFFIX,
     EvalBudget,
     ScorecardRow,
     assert_within_budget,
@@ -62,13 +61,11 @@ from cairn.core.operator import Operation, OperationContext, register_operator
 from cairn.core.operator import ReportSpec
 
 from operator_eval_lm import harness, presets
+# The parsing is shared with the on-box `eval.lm_eval` stage (cairn-extensions#42): one copy.
+from operator_eval_lm.scoring import DROP_SUFFIXES as _DROP_SUFFIXES  # noqa: F401 — re-exported
+from operator_eval_lm.scoring import metric_name as _metric_name
+from operator_eval_lm.scoring import rows_from_results as _rows_from_results
 from operator_eval_lm.schemas.lm_eval import LmEvalConfig, LmEvalInput, LmEvalOutput
-
-#: Metric-name suffixes the harness adds that are not gate-usable scalars.
-#: Checked against the metric NAME, never the raw key: lm-eval spells the error
-#: bar ``exact_match_stderr,strict-match`` — filter suffix LAST — so a check on
-#: the raw key misses it and a standard error lands in the map as a metric.
-_DROP_SUFFIXES = ("_stderr", "_alias")
 
 #: ADR-0103. Stages only — a benchmark has no per-step series to stream, and the
 #: three scalars are the numbers a reviewer wants on the Activity card.
@@ -88,12 +85,6 @@ def _redact(text: str, secret: str | None) -> str:
     return text.replace(secret, "[redacted]") if secret else text
 
 
-def _metric_name(raw: str) -> str:
-    """``exact_match,strict-match`` → ``exact_match`` (the filter suffix is not
-    part of the metric's identity)."""
-    return raw.split(",", 1)[0]
-
-
 def _model_args(inp: LmEvalInput) -> str:
     """lm-eval ``model_args`` for its OpenAI-compatible ``local-completions`` type."""
     parts = [f"model={inp.model}", f"base_url={inp.endpoint_url}",
@@ -101,38 +92,6 @@ def _model_args(inp: LmEvalInput) -> str:
     if inp.tokenizer:
         parts.append(f"tokenizer={inp.tokenizer}")
     return ",".join(parts)
-
-
-def _rows_from_results(results: dict, grader: str) -> list[ScorecardRow]:
-    """Aggregate rows: one per (task, metric), decontaminated twins included."""
-    directions: dict[tuple[str, str], str] = {}
-    for task, mm in (results.get("higher_is_better") or {}).items():
-        if isinstance(mm, dict):
-            for name, higher in mm.items():
-                if higher is not None:
-                    directions[(task, name)] = "higher_better" if higher else "lower_better"
-
-    rows: list[ScorecardRow] = []
-    for task, mm in (results.get("results") or {}).items():
-        if not isinstance(mm, dict):
-            continue
-        for raw, value in mm.items():
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                continue
-            name = _metric_name(raw)
-            if any(name.endswith(s) for s in _DROP_SUFFIXES):
-                continue
-            decon = is_decontaminated(name)
-            # A decontaminated twin inherits the base metric's direction: it is
-            # the same measurement over a filtered document set.
-            base = name[: -len(DECONTAM_SUFFIX)] if decon else name
-            rows.append(ScorecardRow(
-                metric=name, value=float(value), slice=task, grader=grader,
-                direction=directions.get((task, name)) or directions.get((task, base))
-                or "higher_better",
-                decontaminated=decon,
-            ))
-    return rows
 
 
 def _rows_from_samples(results: dict, grader: str) -> list[ScorecardRow]:
@@ -227,6 +186,16 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
             )
 
         ctx.report.stage("resolve", percent=0)
+        if not inp.tasks:
+            preset = presets.load(inp.preset or presets.DEFAULT_PRESET)
+            if preset.limits and not inp.limit:
+                # cairn-extensions#42 — a preset that sizes tasks apart (`limits`, e.g. MMLU per
+                # subject) needs one harness call per task; this operator makes one call with one
+                # limit, which would score `limit` documents in every MMLU subject.
+                return self._stub(
+                    inp, f"preset {preset.name!r} sizes its tasks apart ({sorted(preset.limits)}); "
+                         "eval/lm-eval runs one harness call with one limit. Pass `tasks` and `limit`, "
+                         "or run the preset with the eval.lm_eval flow stage.", preset=preset.name)
         tasks, preset_name, kw = self._resolve(inp)
         if not tasks:
             return self._stub(inp, "no tasks resolved — nothing to evaluate", preset=preset_name)

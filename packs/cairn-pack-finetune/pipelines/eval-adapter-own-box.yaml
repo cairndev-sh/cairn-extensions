@@ -1,0 +1,100 @@
+# pipelines/eval-adapter-own-box.yaml — `eval-adapter` on a box cairn does not start or stop
+# (cairn-extensions#42).
+#
+#   adapter-ref → approve-run ⏸ → eval (ml) → evaluated
+#
+# The same pipeline as `eval-adapter.yaml` without its three box steps (`acquire`, `release-box` and
+# the `release` finalizer) and without the `compute_connection` input: for an SSH box you start and
+# stop yourself (any provider), or for one machine. Everything else is `eval-adapter`'s, line for
+# line; read `eval-adapter.yaml` for what each step does. There is no include between pipeline
+# files, so this is a copy; tests/test_eval_adapter.py fails if the two drift apart.
+#
+# On a connection with `hourly_usd` the leg is priced as in `eval-adapter`, and `approve-run` shows
+# the estimate. The box is yours: cairn never starts or stops it, and a cancel does not stop an
+# evaluation already running on it (stop the job or the box yourself).
+name: eval-adapter-own-box
+kind: pipeline
+visibility: public
+description: >
+  Evaluate an adapter you already have, without training, on a box you start and stop yourself
+  (or one machine): lm-evaluation-harness benchmarks for the base model and the base model plus
+  the adapter with identical settings, and both models' loss on the held-out validation and test
+  versions, as one priced leg.
+outcome: Measure what an adapter changed against its base model on your own box
+suite: model
+
+inputs:
+  adapter_uri: {type: str, description: "The adapter: s3://…/ (an artifact_target: s3 adapter), hf://<repo>, a Hugging Face Hub id, or a directory on the box. Not a promoted tag (<name>@<tag>): pass its URI."}
+  base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face id of the model the adapter was trained on."}
+  accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
+  method: {type: str, default: "qlora", description: "qlora loads the base in 4 bit, as it was trained; lora in float16."}
+  # ADR-0146 — each version must have the role its input names; the launch door refuses anything
+  # else before a record exists.
+  val_version: {type: str, role: validation, description: "dataset:<name>-val@<v> — the registered validation version the adapter was validated on."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version the adapter never saw."}
+  eval_preset: {type: str, default: "forgetting-ifeval", description: "cairn-operator-eval-lm task preset (forgetting-ifeval: forgetting plus IFEval; forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
+  max_seq_len: {type: int, default: 2048, description: "Split-loss rows are truncated at this many tokens (the training run's max_seq_len)."}
+  stub: {type: bool, default: false, description: "The stub evaluation (no GPU): proves the pipeline, measures nothing; `evaluated` then stops it."}
+
+governance:
+  # Sized to the priced leg's worst case: hourly_usd × 6h × 2 attempts = 12 box-hours, $7.92 at the
+  # example rate of $0.66/h. A box dearer than $0.83/h needs a larger budget, or a copy of this
+  # pipeline with a shorter timeout (and a smaller preset).
+  budget: {usd: 10}
+  series: eval-adapter
+  approvers: ml-owners
+
+steps:
+  # ── a URI, not a tag: refused before any box time ─────────────────────────
+  - gate: adapter-ref
+    predicate: "!contains(input.adapter_uri, '@')"
+
+  # ── the PERSON gate before any GPU time ───────────────────────────────────
+  - gate: approve-run
+    depends_on: [adapter-ref]
+    approvers: ml-owners
+    show:
+      - input.adapter_uri
+      - input.base_model
+      - input.method
+      - input.val_version
+      - input.test_version
+      - input.eval_preset
+    # The GPU estimate is not a `show:` field: this is the gate before the first priced leg, so
+    # cairndev puts `estimate_usd` and `estimate_basis` in its evidence (ADR-0151 D4).
+
+  # ── base vs candidate ─────────────────────────────────────────────────────
+  - id: eval
+    label: Benchmarks and held-out loss, base and candidate
+    flow: sft-eval
+    depends_on: [approve-run]
+    timeout: 6h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      adapter_uri: $input.adapter_uri
+      val_uri: $input.val_version
+      test_uri: $input.test_version
+      preset: $input.eval_preset
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 21600
+      stub: $input.stub
+
+  # ── a run without scores is not a result ──────────────────────────────────
+  - gate: evaluated
+    depends_on: [eval]
+    predicate: steps.eval.findings.eval_lm_eval_checked == `true`
+
+outputs:
+  evaluated: eval.eval_lm_eval_checked
+  results: eval.eval_lm_eval_results_uri
+  worst_delta: eval.eval_lm_eval_worst_delta
+  worst_delta_metric: eval.eval_lm_eval_worst_delta_metric
+  regressions: eval.eval_lm_eval_regressions
+  val_loss_base: eval.eval_lm_eval_base_val_loss
+  val_loss: eval.eval_lm_eval_candidate_val_loss
+  test_loss_base: eval.eval_lm_eval_base_test_loss
+  test_loss: eval.eval_lm_eval_candidate_test_loss

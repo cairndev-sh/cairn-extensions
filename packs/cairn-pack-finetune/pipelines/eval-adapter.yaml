@@ -1,0 +1,153 @@
+# pipelines/eval-adapter.yaml — evaluate an adapter you already have, no training
+# (cairn-extensions#42).
+#
+#   adapter-ref → approve-run ⏸ → acquire → eval (ml) → release-box → evaluated
+#                                                     finally: release (on every outcome)
+#
+# The `eval` leg is `sft`'s: the `sft-eval` flow on the GPU box scores the base model and the base
+# model plus the adapter with identical lm-evaluation-harness settings (`eval_preset`; the same
+# 4-bit loading, seed and documents), and both models' loss on the registered val and test
+# versions by one method. Its timeout is priced like any ml leg, so the run is estimated on
+# `approve-run`, reserved before it starts and settled from the box's wall-clock time.
+#
+#   * `adapter-ref` — the adapter must be a URI: `s3://…/` (the prefix `artifact_target: s3`
+#     publishes), `hf://<repo>`, a Hugging Face Hub id, or a directory on the box. A promoted tag
+#     (`<name>@<tag>`, e.g. `ifc-bim-qwen3-4b@candidate`) is refused here, before any box time:
+#     cairndev resolves `dataset:` refs in a leg's inputs but not artifact tags yet, and the box
+#     has no registry. `cairn remote findings <pl_id>` of the run that promoted it shows the URI
+#     (`promote`'s `uri`, or `train`'s `train_qlora_adapter_uri`).
+#   * `approve-run` — a person reads the GPU estimate (`estimate_usd`, `estimate_basis` in the
+#     gate's evidence) before GPU time is spent. The `input.*` fields listed under `show:` are meant
+#     to show the settings, but cairndev 0.3.1 resolves `show:` from step outputs only, so they
+#     read empty until cairndev-sh/cairn#236 lands; the launched inputs are on the pipeline record.
+#   * `acquire` / `release-box` / `release` — as in `sft` (ADR-0151 D8, D9, D11): the box starts
+#     after the approval, stops right after `eval`, and the finalizer stops it on every outcome.
+#   * `eval` — a time probe first: it scores about 50 documents and refuses the leg (a clean
+#     failure, not retried) when the projected run does not fit `time_budget_s`, which must equal
+#     `timeout` in seconds. A killed attempt is retried once and starts again.
+#   * `evaluated` — the run fails unless the leg measured both models (`checked`): a harness that
+#     is missing or failed on the box, or the stub tier, ends here, so a run without scores never
+#     reads as a result.
+#
+# The scores, deltas, standard errors and sample sizes are the `eval` leg's findings
+# (`cairn remote findings <pl_id>`), and its results file is uploaded beside the run's checkpoints
+# when the box sets CAIRN_CHECKPOINT_BUCKET (`eval_lm_eval_results_uri`).
+#
+# `eval-adapter-own-box` is this pipeline without `acquire`, `release-box` and `release`, for a box
+# cairn does not start and stop.
+name: eval-adapter
+kind: pipeline
+visibility: public
+description: >
+  Evaluate an adapter you already have, without training: lm-evaluation-harness benchmarks for
+  the base model and the base model plus the adapter with identical settings, and both models'
+  loss on the held-out validation and test versions, as one priced leg on a GPU box that cairn
+  starts after approval and stops on every outcome.
+outcome: Measure what an adapter changed against its base model
+suite: model
+
+inputs:
+  adapter_uri: {type: str, description: "The adapter: s3://…/ (an artifact_target: s3 adapter), hf://<repo>, a Hugging Face Hub id, or a directory on the box. Not a promoted tag (<name>@<tag>): pass its URI."}
+  base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face id of the model the adapter was trained on."}
+  accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
+  method: {type: str, default: "qlora", description: "qlora loads the base in 4 bit, as it was trained; lora in float16."}
+  # ADR-0146 — each version must have the role its input names; the launch door refuses anything
+  # else before a record exists.
+  val_version: {type: str, role: validation, description: "dataset:<name>-val@<v> — the registered validation version the adapter was validated on."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version the adapter never saw."}
+  eval_preset: {type: str, default: "forgetting-ifeval", description: "cairn-operator-eval-lm task preset (forgetting-ifeval: forgetting plus IFEval; forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
+  max_seq_len: {type: int, default: 2048, description: "Split-loss rows are truncated at this many tokens (the training run's max_seq_len)."}
+  stub: {type: bool, default: false, description: "The stub evaluation (no GPU): proves the pipeline, measures nothing; `evaluated` then stops it."}
+  # ADR-0151 D11 — must equal the environment's `ml_target` (not checked by cairndev yet:
+  # cairndev-sh/cairn#216).
+  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after eval; must be the environment's ml_target (finetune-ssh: gpu)."}
+
+governance:
+  # Sized to the priced leg's worst case: hourly_usd × 6h × 2 attempts = 12 box-hours, $7.92 at the
+  # example rate of $0.66/h. A box dearer than $0.83/h needs a larger budget, or a copy of this
+  # pipeline with a shorter timeout (and a smaller preset).
+  budget: {usd: 10}
+  series: eval-adapter
+  approvers: ml-owners
+
+steps:
+  # ── a URI, not a tag: refused before any box time ─────────────────────────
+  - gate: adapter-ref
+    predicate: "!contains(input.adapter_uri, '@')"
+
+  # ── the PERSON gate before any GPU time ───────────────────────────────────
+  - gate: approve-run
+    depends_on: [adapter-ref]
+    approvers: ml-owners
+    show:
+      - input.adapter_uri
+      - input.base_model
+      - input.method
+      - input.val_version
+      - input.test_version
+      - input.eval_preset
+      - input.compute_connection
+    # The GPU estimate is not a `show:` field: this is the gate before the first priced leg, so
+    # cairndev puts `estimate_usd` and `estimate_basis` in its evidence (ADR-0151 D4).
+
+  # ── start the box, after the approval (ADR-0151 D11) ──────────────────────
+  # The lease covers the retried worst case, 2 attempts × 6h = 12h, plus a one-hour margin.
+  - id: acquire
+    label: Start the GPU box
+    task: compute/acquire
+    depends_on: [approve-run]
+    with:
+      connection: $input.compute_connection
+      max_hours: 13
+
+  # ── base vs candidate ─────────────────────────────────────────────────────
+  - id: eval
+    label: Benchmarks and held-out loss, base and candidate
+    flow: sft-eval
+    depends_on: [acquire]
+    timeout: 6h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      adapter_uri: $input.adapter_uri
+      val_uri: $input.val_version
+      test_uri: $input.test_version
+      preset: $input.eval_preset
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 21600
+      stub: $input.stub
+
+  # ── stop the box: the GPU leg is done (ADR-0151 D11) ──────────────────────
+  - id: release-box
+    label: Stop the GPU box
+    task: compute/release
+    depends_on: [eval]
+    with:
+      connection: $input.compute_connection
+
+  # ── a run without scores is not a result ──────────────────────────────────
+  - gate: evaluated
+    depends_on: [eval, release-box]
+    predicate: steps.eval.findings.eval_lm_eval_checked == `true`
+
+  # ── the backstop: stop the box on every outcome (ADR-0097, ADR-0151 D9/D11) ──
+  - id: release
+    label: Stop the GPU box (finally)
+    task: compute/release
+    finalizer: true
+    with:
+      connection: $input.compute_connection
+
+outputs:
+  evaluated: eval.eval_lm_eval_checked
+  results: eval.eval_lm_eval_results_uri
+  worst_delta: eval.eval_lm_eval_worst_delta
+  worst_delta_metric: eval.eval_lm_eval_worst_delta_metric
+  regressions: eval.eval_lm_eval_regressions
+  val_loss_base: eval.eval_lm_eval_base_val_loss
+  val_loss: eval.eval_lm_eval_candidate_val_loss
+  test_loss_base: eval.eval_lm_eval_base_test_loss
+  test_loss: eval.eval_lm_eval_candidate_test_loss

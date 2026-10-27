@@ -67,9 +67,9 @@
     {
       "ref": "cairn-operator-eval-lm",
       "kind": "operator_pack",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "trust": "official",
-      "description": "eval/lm-eval: lm-evaluation-harness against a served candidate, presets as pack data.",
+      "description": "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box; presets as pack data.",
       "operators": [
         "eval/lm-eval"
       ],
@@ -125,11 +125,13 @@
     },
     {
       "ref": "finetune",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "trust": "official",
-      "description": "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person.",
+      "description": "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person, with benchmarks and held-out loss for base and candidate; or evaluate an adapter you already have.",
       "kind": "domain_pack",
       "pipelines": [
+        "eval-adapter",
+        "eval-adapter-own-box",
         "sft",
         "sft-own-box"
       ],
