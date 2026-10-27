@@ -31,7 +31,7 @@ The engine, the builtin operator packs and the core contracts live in
 
 | Domain pack | What | Stages from |
 |---|---|---|
-| [`cairn-pack-dataset-prep`](packs/cairn-pack-dataset-prep/README.md) | `dataset-prep/prepare`: pin a source, audit it, split it by group and register `train`, `val` and `test` versions with their roles | `cairn-operator-dataset-checks` |
+| [`cairn-pack-dataset-prep`](packs/cairn-pack-dataset-prep/README.md) | `dataset-prep/prepare`: pin a source, audit it, split it by group and register `train`, `val` and `test` versions with their roles; a person reviews the run when dedup drops a large share of the source | `cairn-operator-dataset-checks` |
 | [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, three approvals and a governed tag, starting its GPU box after approval and stopping it on every outcome (`finetune/sft-own-box`: the same on a box you manage, or one machine); the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training` |
 
 ## Install

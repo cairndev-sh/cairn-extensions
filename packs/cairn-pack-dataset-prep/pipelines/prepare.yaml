@@ -1,11 +1,14 @@
 # pipelines/prepare.yaml — prepare a dataset once (cairn-extensions#16).
 #
-#   source-ok ⏸ → prepare (data flow) → format → data gate
+#   source-ok ⏸ → prepare (data flow) → data-review ⏸ (only when cleaning dropped a lot)
+#     → format → data gate
 #
 # `source-ok` is a person confirming the source, its pin and the name before anything is
 # written. `prepare` runs flows/prepare.yaml as one governed leg and, when it lands, the control plane
 # registers `<register>-train`, `-val` and `-test` with roles training, validation and test,
-# stamps each with its intake verdict, and registers the manifest (a report). `format` checks
+# stamps each with its intake verdict, and registers the manifest (a report). `data-review` is a
+# person looking at the numbers when either dedup pass dropped more than `review_drop_ratio` of
+# what it read (cairn-extensions#39); otherwise it is routed off and nothing waits. `format` checks
 # the cleaned corpus's example structure against the trainers it must feed. `data-ok` stops
 # the pipeline (fail-closed) when a version came back blocked or invalid, or any example is
 # malformed. The versions stay registered (the registry is append-only); a launch that names
@@ -50,6 +53,11 @@ inputs:
   max_seq_len: {type: int, default: 0, description: "Training sequence length; longer examples are counted (0 = no limit)."}
   over_length: {type: str, default: "count", description: "count | drop | refuse for examples over max_seq_len. Never truncate."}
   store: {type: str, default: "", description: "s3 or local for the exported files; empty = the environment's artifact store. Registering the versions needs s3."}
+  # Not a flow key, so `$inherit` does not wire it into the leg: only `data-review` reads it.
+  review_drop_ratio:
+    type: float
+    default: 0.30
+    description: "Pause at data-review when exact or near dedup drops more than this share of the rows it read (0.30 = 30%); 1.0 never pauses."
 
 governance:
   budget: {usd: 1}
@@ -74,10 +82,55 @@ steps:
     depends_on: [source-ok]
     timeout: 60m
 
+  # The REVIEW gate (cairn-extensions#39): a person, only when cleaning removed a large share of
+  # the source. In the first qualification run near dedup dropped 36,385 of 42,680 rows (85%) and
+  # nobody saw the number before training. `when:` is plain JMESPath and cannot divide, so each
+  # dedup pass reports `dropped_fraction` (dropped / the rows that pass read) and this compares
+  # each with `review_drop_ratio`. Near dedup's share is of what exact dedup kept, so two passes
+  # just under the limit can together drop more than it; each is shown below.
+  #
+  # Written as "not (both within the limit)" so it fails closed: a missing stat (an older
+  # cairn-operator-dataset-checks) routes the gate IN, never off. A limit that is not a number is
+  # refused at the launch door (the input is declared float).
+  #
+  # `show:` reads the prepare leg's findings only: cairndev 0.3.1 resolves `show:` refs against
+  # step outputs, so `input.near_dup_threshold` would read None (cairndev-sh/cairn#236).
+  # `dedup_near_threshold` is the threshold the near pass applied; with `dedup_near_method`
+  # `skipped` (no [minhash] extra) there is none.
+  #
+  # Approving (`cairn remote advance <pipeline-id> data-review`) lets the run go on to `format`
+  # and `data-ok`. A pipeline gate has no reject door in cairndev 0.3.1: to decline, cancel the
+  # pipeline (`cairn remote cancel-pipeline <pipeline-id>`), which ends it and records the open
+  # review as rejected. Either way the three versions are already registered (the leg registers
+  # them when it lands): declining does not mark them, and the fine-tune pack's launch door still
+  # admits them. Do not train on a declined run's versions; re-run with another threshold
+  # instead. Marking them when the review is declined is follow-up work.
+  - gate: data-review
+    depends_on: [prepare]
+    when: >-
+      !(steps.prepare.findings.dedup_exact_dropped_fraction <= input.review_drop_ratio &&
+      steps.prepare.findings.dedup_near_dropped_fraction <= input.review_drop_ratio)
+    approvers: data-owners
+    show:
+      - prepare.ingest_normalize_rows
+      - prepare.dedup_exact_dropped
+      - prepare.dedup_exact_dropped_fraction
+      - prepare.dedup_near_dropped_near
+      - prepare.dedup_near_dropped_fraction
+      - prepare.dedup_near_threshold
+      - prepare.dedup_near_method
+      - prepare.export_jsonl_rows
+      - prepare.profile_tokens_tokens_total
+      - prepare.profile_tokens_tokens_p95
+      - prepare.profile_tokens_over_length_rows
+      - prepare.split_rows_train
+      - prepare.split_rows_val
+      - prepare.split_rows_test
+
   - id: format
     label: Check the example structure
     task: dataset/format
-    depends_on: [prepare]
+    depends_on: [data-review]
     with:
       path: $steps.prepare.export_jsonl_output
       target_trainers: [trl, unsloth]
@@ -97,6 +150,8 @@ outputs:
   rows_in: prepare.ingest_normalize_rows
   exact_duplicates: prepare.dedup_exact_dropped
   near_duplicates: prepare.dedup_near_dropped_near
+  exact_dropped_fraction: prepare.dedup_exact_dropped_fraction
+  near_dropped_fraction: prepare.dedup_near_dropped_fraction
   tokens_p95: prepare.profile_tokens_tokens_p95
   over_length_rows: prepare.profile_tokens_over_length_rows
   topics: prepare.profile_fields_topic_values

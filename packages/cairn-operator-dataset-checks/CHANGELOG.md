@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Both dedup passes report the share they dropped** (cairn-extensions#39). `dedup.exact`
+  (python and duckdb backends) and `dedup.near` add `dropped_fraction`: `dropped` divided by the
+  rows the stage read, rounded to 4 places, 0.0 for an empty input or a skipped near pass. A
+  pipeline expression cannot divide, so a gate that pauses when a pass drops too much compares
+  this stat with its limit. Both kernels implement the 1.1.0 revision of their stage contract,
+  which requires the stat (1.0.0 stays published, unchanged). Requires
+  `cairn-contracts-dataset-stages==1.5.0`.
+
 - **Prompt+response length, derived fields and field counts** (cairn-extensions#16).
   `profile.tokens` implements 1.1.0: `measure: example` counts prompt + response and reports
   each side's p50/p95/max (`measure: response`, the default, is unchanged). New stage

@@ -12,7 +12,7 @@ A domain pack: YAML and a sample, no code. Every stage comes from
 ## The `prepare` pipeline
 
 ```
-source-ok ⏸ → prepare (one data leg) → format → data-ok
+source-ok ⏸ → prepare (one data leg) → data-review ⏸ (only when cleaning dropped a lot) → format → data-ok
 ```
 
 - **`source-ok`:** a person confirms the source, its revision and the name the versions are
@@ -34,6 +34,8 @@ source-ok ⏸ → prepare (one data leg) → format → data-ok
      citation, and the fetch time.
 
   Each registered version gets its intake verdict.
+- **`data-review`:** a person looks at the numbers when cleaning removed a large share of the
+  source; see [The data review](#the-data-review). Otherwise it is skipped and nothing waits.
 - **`format`:** checks every example's structure against TRL and Unsloth.
 - **`data-ok`:** stops the pipeline when a version came back blocked or invalid, or an example
   is malformed.
@@ -48,6 +50,7 @@ pip install cairn-pack-dataset-prep            # the pipeline; near dedup and to
 cairn remote presets dataset-prep/prepare      # the shipped presets
 cairn remote launch dataset-prep/prepare --preset ifc-bim-alpaca --watch
 cairn remote advance <pipeline-id> source-ok  # a person confirms the source
+cairn remote advance <pipeline-id> data-review   # only if the run paused there: a person read the numbers
 cairn remote findings <pipeline-id>           # rows in, duplicates dropped, lengths, the three versions
 ```
 
@@ -69,6 +72,52 @@ MinIO or another S3-compatible store). With the local store the split refuses to
 its files sit in the leg's temporary workdir, which a reboot deletes and another machine cannot
 read.
 
+## The data review
+
+Dedup can remove far more than expected. In the qualification run (cairn-extensions#9), near dedup at
+threshold 0.8 dropped 36,385 of 42,680 rows (85%), and training went ahead on what was left
+without anyone looking at that number. `data-review` makes a drop that size a decision.
+
+After `prepare`, the pipeline pauses at `data-review` (approvers `data-owners`) when exact or near
+dedup dropped more than `review_drop_ratio` of the rows it read. The default is `0.30`. Each pass
+reports its own share, `dropped_fraction`: exact dedup's is of the rows read, near dedup's is of
+the rows exact dedup kept. The gate compares each share with the limit separately, so two passes
+just under it can together drop more. When neither share is over the limit, the gate is skipped
+and the run goes straight to `format`.
+
+The card shows, from the `prepare` leg's findings:
+
+| Field | What |
+|---|---|
+| `ingest_normalize_rows` | rows in |
+| `dedup_exact_dropped`, `dedup_exact_dropped_fraction` | exact duplicates dropped, and their share |
+| `dedup_near_dropped_near`, `dedup_near_dropped_fraction` | near duplicates dropped, and their share of what exact dedup kept |
+| `dedup_near_threshold`, `dedup_near_method` | the near threshold applied (`minhash`), or `skipped` without the `[all]` extra |
+| `export_jsonl_rows` | rows kept, the cleaned corpus the split reads |
+| `profile_tokens_tokens_total`, `profile_tokens_tokens_p95` | tokens, and the p95 example length |
+| `profile_tokens_over_length_rows` | rows over `max_seq_len` |
+| `split_rows_train`, `split_rows_val`, `split_rows_test` | split sizes |
+
+- **Approve:** `cairn remote advance <pipeline-id> data-review`. The run goes on to `format`
+  and `data-ok`.
+- **Decline:** cairndev 0.3.1 has no reject action for a pipeline gate, so cancel the pipeline
+  with `cairn remote cancel-pipeline <pipeline-id>`. The run ends and the open review is recorded
+  as rejected. The three versions are already registered when the gate pauses (the `prepare` leg
+  registers them when it lands), and declining does not mark them: the fine-tune pack's launch
+  door still accepts them. Do not train on a declined run's versions; prepare again under
+  another `register` name instead. Marking the versions of a declined review is not done yet.
+- **Compare thresholds before you choose.** Launch the same source with another near threshold
+  and compare the two runs' findings, for example `-i near_dup_threshold=0.9` beside the default
+  0.8. A higher threshold drops only closer pairs, so it drops fewer rows. Exact dedup alone is what a lean
+  install runs: without the `[all]` extra near dedup is skipped (`dedup_near_method: skipped`).
+  The holdout door compares train and test at 0.8. Above that, near dedup keeps pairs the door
+  still counts as near duplicates, and if such a pair lands on both sides of the split the
+  fine-tune launch is refused. A 0.9 run therefore shows what a looser dedup would keep; it is
+  not automatically a set to train on.
+- **Change or turn off the limit:** `-i review_drop_ratio=0.5` pauses only above half;
+  `-i review_drop_ratio=1.0` never pauses (a share is at most 1.0). A value that is not a number
+  is refused at launch.
+
 ## Presets
 
 | Preset | What it prepares |
@@ -83,6 +132,7 @@ validator (cairn-extensions#12).
 | Path | Status | Evidence | Proven on `cairndev` |
 |---|---|---|---|
 | `prepare` on the builtin data engine, s3 store | EXPERIMENTAL | `tests/test_prepare.py`: the pack's flow, the core runner and registration in process, on the 200-row sample and a mocked S3 bucket | 0.2.1 (the released wheel from PyPI: a local run and CI's `scripts/test_wheels.sh`) |
+| `data-review` pauses above `review_drop_ratio` and is skipped below it | EXPERIMENTAL | `tests/test_data_review.py`: the pipeline through the core's launch door and in-process bridge, the flow on the core runner in process, a mocked S3 bucket; the near-duplicate route needs the `[minhash]` extra and is skipped without it | 0.3.1 (a local run and CI's `scripts/test_wheels.sh`) |
 | `prepare` on a Hub source with `revision`, through `cairn remote launch` | not yet | the qualification run, cairn-extensions#9 | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dedup_exact.output/1.1.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows kept."
+    },
+    "dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows dropped."
+    },
+    "dropped_exact": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows dropped as exact duplicates (read by intake)."
+    },
+    "dropped_near": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows dropped as near duplicates."
+    },
+    "dropped_fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "dropped / the rows this stage read, rounded to 4 places; 0.0 for an empty input (cairn-extensions#39)."
+    },
+    "backend": {
+      "type": "string",
+      "description": "The backend that ran."
+    }
+  },
+  "required": [
+    "rows",
+    "dropped",
+    "dropped_exact",
+    "dropped_near",
+    "dropped_fraction",
+    "backend"
+  ]
+}
