@@ -118,7 +118,7 @@ inputs:
   ifc_schema: {type: str, default: "", description: "An IFC schema (IFC2X3, IFC4, IFC4X3_ADD2): the ifc leg checks every answer as IFC for the reference, the base model and the candidate. Empty = no IFC check (the leg is routed off)."}
   # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
   # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.
-  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after eval; must be the environment's ml_target (finetune-ssh: gpu)."}
+  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after the last box leg (eval, generate, ifc); must be the environment's ml_target (finetune-ssh: gpu)."}
 
 governance:
   # #27, #42, #41 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the

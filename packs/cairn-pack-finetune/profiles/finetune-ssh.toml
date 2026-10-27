@@ -3,7 +3,7 @@
 # qualification run is cairn-extensions#9. The pack README's "Run it" walks through every step.
 #
 # The control plane (runs the engine, the data leg and the gates, and starts and stops the box;
-# no torch). cairn-pack-finetune 0.2.0 needs cairndev 0.3.1 or later (compute/acquire,
+# no torch). cairn-pack-finetune 0.2.0 and later need cairndev 0.3.1 or later (compute/acquire,
 # compute/release and the GPU estimate):
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh

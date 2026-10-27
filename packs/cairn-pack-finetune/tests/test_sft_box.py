@@ -364,7 +364,7 @@ async def _launch_and_approve(b):
 
 async def test_the_stub_run_starts_the_box_after_approval_and_stops_it_after_train(env, monkeypatch):
     """`stub: true` end to end on the bridge: the box starts only after `approve-run`, whose card
-    carries the estimate; it stops right after `eval`, before `improved` (which stops a stub
+    carries the estimate; it stops right after the last box leg (`generate`, or `ifc` when it runs), before `improved` (which stops a stub
     adapter) is decided; the finalizer release finds it stopped and is a success."""
     engine = FakeBoxEngine(env.box, env.timeline, monkeypatch)
     b, audits = await _bridge(engine, monkeypatch)
