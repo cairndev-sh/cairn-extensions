@@ -76,6 +76,13 @@
 [profile]
 visibility = "public"
 
+[profile.bindings]
+# The tamper-evident, hash-chained audit trail of every governed action (the builtin
+# cairn-operator-audit-store that ships with cairndev). Without it, audit events are dropped
+# (NullAuditSink) and `cairn doctor --strict` says so. CAIRN_AUDIT_LOG sets the file
+# (default `audit.jsonl` in the engine's working directory); keep it on durable disk.
+"audit.sink" = "audit/store"
+
 [profile.backends]
 dataflow_engine  = "builtin"  # dataset-prep/prepare's data leg, on the control plane's box
 ml_engine        = "builtin"  # the sft-train flow, dispatched to ml_target

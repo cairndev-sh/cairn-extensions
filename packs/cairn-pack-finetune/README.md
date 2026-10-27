@@ -118,6 +118,7 @@ with the reason; `cairn pipeline run` exits 3). Use `inprocess` (the default) or
 cairn ls finetune                                  # lists profiles/finetune-ssh.toml with its installed path
 export CAIRN_PROFILE=<that path>
 export CAIRN_ARTIFACT_S3_BUCKET=<bucket>           # the registered dataset versions (CAIRN_ARTIFACT_S3_PREFIX optional)
+export CAIRN_AUDIT_LOG=$HOME/.cairn/audit.jsonl     # the profile binds the hash-chained audit trail here (default: ./audit.jsonl)
 export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"      # read by the engine; cairn never writes it to disk
 cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
   --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY \

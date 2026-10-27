@@ -125,7 +125,7 @@
     },
     {
       "ref": "finetune",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "trust": "official",
       "description": "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person.",
       "kind": "domain_pack",

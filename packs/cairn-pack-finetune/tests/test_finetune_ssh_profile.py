@@ -153,3 +153,11 @@ def test_the_commented_remote_env_line_is_one_the_ssh_engine_accepts(tmp_path, m
 def test_the_header_names_what_a_deployment_must_set(needle):
     header = PROFILE.read_text(encoding="utf-8").split("[profile]")[0]
     assert needle in header
+
+
+def test_the_profile_binds_the_audit_sink():
+    """The governed run keeps a hash-chained audit trail (cairn-extensions#38): `audit.sink` is
+    bound to the builtin audit store, not left to the NullAuditSink that drops every event."""
+    from cairn.core.pack.profile import load_profile_from_env
+
+    assert dict(load_profile_from_env().bindings).get("audit.sink") == "audit/store"
