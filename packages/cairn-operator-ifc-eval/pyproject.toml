@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cairn-operator-ifc-eval"
+version = "0.1.0"
+description = "eval/ifc-validate: do generated IFC snippets parse, and do they hold to the targeted schema (IfcOpenShell); and the eval.ifc_validate flow stage that scores a generation eval's samples for the base model and the candidate."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{name = "cairn maintainers"}]
+requires-python = ">=3.12"
+# Light by design: IfcOpenShell is the optional [ifc] extra, imported only when a check runs, so the
+# pack registers and reports `checked: false` without it. The base install is the engine range this
+# pack is proven on (ADR-0128 D3: bounded, the same range as `[compat]`). No contract wheel: the
+# operator and the stage implement no shared contract yet (the eval-lm precedent).
+dependencies = [
+    "cairndev>=0.3.1,<0.4",
+]
+
+[project.urls]
+Homepage = "https://cairndev.sh"
+Documentation = "https://docs.cairndev.sh"
+Source = "https://github.com/cairndev-sh/cairn-extensions"
+Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
+
+[project.optional-dependencies]
+# ifc — IfcOpenShell (LGPL-3.0), the IFC reader and schema validator. Bounded to the release line
+# the checks were read and tested against (0.9). Without it every check reports `checked: false`.
+ifc = ["ifcopenshell>=0.9,<0.10"]
+# box — the eval.ifc_validate stage on the GPU box: IfcOpenShell, and boto3 for an s3:// samples file
+# and the results upload (cairn-operator-training[gpu] already carries boto3 there).
+box = ["ifcopenshell>=0.9,<0.10", "boto3>=1.34"]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh), so
+# the ten-snippet fixture runs against the real IfcOpenShell. moto: a fake S3.
+test = ["ifcopenshell>=0.9,<0.10", "moto[s3]>=5"]
+
+[project.entry-points."cairn.operators"]
+"eval/ifc-validate" = "operator_ifc_eval.operators.ifc_validate:IfcValidateOp"
+
+# The on-box kernel, in the engine-neutral flow-stage group (ADR-0082 D7): a generation eval's
+# samples scored for each model, as an ml leg a domain pack's flow names.
+[project.entry-points."cairn.flow_stages"]
+"eval.ifc_validate" = "operator_ifc_eval.flow_stages:eval_ifc_validate"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/operator_ifc_eval"]
+exclude = ["CLAUDE.md", "AGENTS.md"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pack.toml" = "operator_ifc_eval/pack.toml"
+
+# Process files (agent instructions) and tests stay out of the source archive.
+[tool.hatch.build.targets.sdist]
+exclude = ["CLAUDE.md", "AGENTS.md", "/.claude", "/tests"]
