@@ -12,6 +12,7 @@ cairn-operator-training = { workspace = true }
 cairn-contracts-dataset = { workspace = true, editable = false }
 cairn-contracts-dataset-stages = { workspace = true, editable = false }
 cairn-operator-dataset-checks = { workspace = true }
+cairn-operator-eval-lm = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,0 +1,29 @@
+# smoke — the DEFAULT task preset (ADR-0102 D5).
+#
+# The bar this preset is written to: it must finish in MINUTES against a served
+# model, on every run, so that "did the candidate keep its classic benchmark
+# numbers" is a question a pipeline can afford to ask on every candidate rather
+# than once before release. `limit` is what buys that — 40 documents per task is
+# a signal, not a leaderboard number, and the record says so.
+#
+# Presets are DATA. Changing the task list here changes what every pipeline
+# measures without touching a line of Python — which is the whole reason
+# lm-evaluation-harness was chosen over a hand-rolled benchmark runner: its
+# YAML task authoring lets a non-Python operator pack ship tasks as data.
+
+name        = "smoke"
+description = "Small, minutes-long instruction + reasoning + knowledge check on a served candidate."
+
+# Task ids as lm-evaluation-harness knows them.
+tasks = ["gsm8k", "arc_easy", "hellaswag"]
+
+num_fewshot = 0
+limit       = 40          # documents per task — the cost bound
+batch_size  = 8
+
+# 13-gram overlap decontamination (lm-eval `docs/decontamination.md`). OPT-IN
+# upstream and OFF by default for new tasks; ADR-0102 D5 turns it ON here. It
+# only produces the `_decontaminate` metric twin for tasks that override
+# `should_decontaminate` + `doc_to_decontamination_query` — the operator reports
+# when it was requested and no decontaminated metric came back.
+decontaminate = true

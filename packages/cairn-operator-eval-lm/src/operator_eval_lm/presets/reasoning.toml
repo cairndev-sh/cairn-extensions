@@ -1,0 +1,17 @@
+# reasoning — maths + multi-step reasoning, deeper than `smoke`.
+#
+# Tens of minutes against a served 7B, not minutes: `limit` is 10× smoke's and
+# gsm8k runs 5-shot, which is the setting published numbers use. Reach for this
+# when a candidate's whole point is reasoning; `smoke` stays the per-candidate
+# default.
+
+name        = "reasoning"
+description = "GSM8K (5-shot) + ARC-Challenge + winogrande — maths and multi-step reasoning."
+
+tasks = ["gsm8k", "arc_challenge", "winogrande"]
+
+num_fewshot = 5
+limit       = 400
+batch_size  = 8
+
+decontaminate = true

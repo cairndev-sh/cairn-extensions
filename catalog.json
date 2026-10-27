@@ -65,6 +65,27 @@
       }
     },
     {
+      "ref": "cairn-operator-eval-lm",
+      "kind": "operator_pack",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "eval/lm-eval: lm-evaluation-harness against a served candidate, presets as pack data.",
+      "operators": [
+        "eval/lm-eval"
+      ],
+      "provides": [
+        "eval.lm_eval"
+      ],
+      "executors": [
+        "in_process"
+      ],
+      "gpu": false,
+      "install": {
+        "index": "pypi",
+        "name": "cairn-operator-eval-lm"
+      }
+    },
+    {
       "ref": "cairn-operator-training",
       "kind": "operator_pack",
       "version": "0.1.0",

@@ -78,6 +78,7 @@ from the tree):
 - `cairn-contracts-training`
 - `cairn-contracts-training-stages`
 - `cairn-operator-dataset-checks`
+- `cairn-operator-eval-lm`
 - `cairn-operator-training`
 - `cairn-pack-dataset-prep` (once its pull request lands)
 - `cairn-pack-finetune` (once its pull request lands)
@@ -138,7 +139,9 @@ does not have yet:
 
 1. The contract wheels: `cairn-contracts-dataset`, `cairn-contracts-dataset-stages`,
    `cairn-contracts-training`, `cairn-contracts-training-stages`.
-2. The operator packs: `cairn-operator-dataset-checks`, `cairn-operator-training`.
+2. The operator packs: `cairn-operator-dataset-checks`, `cairn-operator-training`,
+   `cairn-operator-eval-lm` (it depends on no other distribution here, so its place in the order
+   does not matter).
 3. The domain packs: `cairn-pack-dataset-prep`, `cairn-pack-finetune`.
 
 Each tag is its own run and needs its own approval. The version-bump check passes for every
