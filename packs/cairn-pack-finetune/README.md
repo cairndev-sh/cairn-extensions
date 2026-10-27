@@ -165,6 +165,7 @@ with the reason; `cairn pipeline run` exits 3). Use `inprocess` (the default) or
 cairn ls finetune                                  # lists profiles/finetune-ssh.toml with its installed path
 export CAIRN_PROFILE=<that path>
 export CAIRN_ARTIFACT_S3_BUCKET=<bucket>           # the registered dataset versions (CAIRN_ARTIFACT_S3_PREFIX optional)
+export CAIRN_AUDIT_LOG=$HOME/.cairn/audit.jsonl     # the profile's hash-chained audit log: one file per engine process (default: ./audit.jsonl)
 export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"      # read by the engine; cairn never writes it to disk
 cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
   --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY \
@@ -366,7 +367,8 @@ under an unknown one, `holdout` included.
 records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` and must reach the
 URI. **On one machine:** use `finetune/sft-own-box` (`sft` needs an EC2 instance to start and
 stop) with the default profile and no ssh settings; dataset-prep still registers its versions
-through the s3 store.
+through the s3 store. The default profile binds no audit sink: bind `"audit.sink" = "audit/store"`
+in your own profile, or use the core `secure` profile, to keep the audit log.
 
 ## Presets and profiles
 

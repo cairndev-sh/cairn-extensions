@@ -76,6 +76,19 @@
 [profile]
 visibility = "public"
 
+[profile.bindings]
+# The hash-chained audit log (the builtin cairn-operator-audit-store that ships with cairndev).
+# Without it, the events the core sends to the audit sink are dropped (NullAuditSink) and
+# `cairn doctor --strict` fails. Under cairndev 0.3.1 the core writes a refused gate decision,
+# template-path approvals and licence acceptance, LLM and MCP calls there; a pipeline's gate
+# approvals, box start and stop and promotion are recorded on the run record instead
+# (cairndev-sh/cairn#233). CAIRN_AUDIT_LOG sets the file (default `audit.jsonl` in the engine's
+# working directory): one file per engine process, on durable disk.
+"audit.sink" = "audit/store"
+# Redaction before anything leaves for an LLM vendor (the builtin cairn-operator-redact-regex).
+# `sft` makes no LLM calls; bound so the profile is complete and `cairn doctor --strict` passes.
+"redact.text" = "redact/text"
+
 [profile.backends]
 dataflow_engine  = "builtin"  # dataset-prep/prepare's data leg, on the control plane's box
 ml_engine        = "builtin"  # the sft-train and sft-eval flows, dispatched to ml_target
