@@ -6,7 +6,7 @@
     {
       "ref": "cairn-operator-dataset-checks",
       "kind": "operator_pack",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "trust": "official",
       "description": "Deterministic readiness checks for fine-tuning datasets (format, dedup, …).",
       "operators": [
@@ -111,7 +111,7 @@
     },
     {
       "ref": "dataset-prep",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "trust": "official",
       "description": "Prepare a dataset once: pin the source, audit it, split it by group and register train, val and test versions with their roles.",
       "kind": "domain_pack",

@@ -1,0 +1,8 @@
+{
+  "format": "cairn.stage/1",
+  "id": "dataset.stage.dedup_near",
+  "revision": "1.1.0",
+  "summary": "`dedup.near` — Drop near-duplicate rows (MinHash); an honest skip without the [minhash] extra. 1.1.0: reports `dropped_fraction`, the share of its input it dropped (0.0 when skipped).",
+  "configuration": "contract://dataset.stage.dedup_near.configuration/1.0.0",
+  "output": "contract://dataset.stage.dedup_near.output/1.1.0"
+}
