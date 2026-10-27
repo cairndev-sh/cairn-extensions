@@ -1,7 +1,7 @@
 # pipelines/sft-own-box.yaml — `sft` on a box cairn does not start or stop (cairn-extensions#26).
 #
-#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → eval (ml) → improved → promote-model ⏸
-#     → promote ⏸
+#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → eval (ml) → generate (ml)
+#     → ifc (ml, when ifc_schema is set) → improved → promote-model ⏸ → promote ⏸
 #
 # The same pipeline as `sft.yaml` without its three box steps (`acquire`, `release-box` and the
 # `release` finalizer) and without the `compute_connection` input: for an SSH box you start and
@@ -62,13 +62,18 @@ inputs:
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer and stub evaluation (no GPU): proves the pipeline, trains and measures nothing."}
   # cairn-extensions#42 — the `eval` leg.
   eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
-  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models; also draws the generate leg's prompts and seeds its decoding."}
+  # cairn-extensions#41 — the `generate` leg, and the validator legs that read its answers.
+  generate_sample_n: {type: int, default: 50, description: "Prompts from test_version the generate leg answers with the base model and with the candidate (all of them when it has fewer)."}
+  generate_max_new_tokens: {type: int, default: 512, description: "The longest answer the generate leg asks for, in tokens."}
+  ifc_schema: {type: str, default: "", description: "An IFC schema (IFC2X3, IFC4, IFC4X3_ADD2): the ifc leg checks every answer as IFC for the reference, the base model and the candidate. Empty = no IFC check (the leg is routed off)."}
 
 governance:
-  # #27, #42 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch
-  # door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h) × 2 attempts = 31
-  # box-hours, $20.46 at the example rate of $0.66/h. A box dearer than $0.80/h needs a larger
-  # budget, or a copy of this pipeline with shorter timeouts.
+  # #27, #42, #41 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the
+  # launch door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h + 1h + 15m)
+  # × 2 attempts = 33.5 box-hours, $22.11 at the example rate of $0.66/h (the ifc leg is priced
+  # whether or not the launch routes it off). A box dearer than $0.74/h needs a larger budget, or a
+  # copy of this pipeline with shorter timeouts.
   budget: {usd: 25}
   series: sft
   approvers: ml-owners
@@ -182,9 +187,57 @@ steps:
       time_budget_s: 10800
       stub: $input.stub
 
+  # ── the models' own answers, on the same box (cairn-extensions#41) ────────
+  # The `sft-generate` flow: `generate_sample_n` prompts drawn from the test version with
+  # `eval_seed`, answered by the base model (loaded once, 4-bit for qlora) and then by the adapter
+  # on the same weights, with the chat template the adapter was trained with and greedy decoding;
+  # both scored against the references (exact match, contains); the answers kept as a samples file
+  # (`eval_generate_samples_uri`). The first batch projects the run and refuses the leg (a clean
+  # failure, not retried) when it would not fit `time_budget_s`, which must equal `timeout` in
+  # seconds. A missing or failing backend reports `checked: false` and writes no samples. A killed
+  # attempt is retried once and starts again.
+  - id: generate
+    label: Generated answers, base and candidate
+    flow: sft-generate
+    depends_on: [eval]
+    timeout: 1h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      local_adapter_dir: $steps.train.train_qlora_local_adapter_dir
+      adapter_uri: $steps.train.train_qlora_adapter_uri
+      test_uri: $input.test_version
+      sample_n: $input.generate_sample_n
+      max_new_tokens: $input.generate_max_new_tokens
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 3600
+      stub: $input.stub
+
+  # ── a validator on those answers, when the launch asks for one ────────────
+  # Routed off (skipped, the pipeline continues) unless `ifc_schema` names a schema. The
+  # `ifc-validate` flow reads the samples file on this box (or from the checkpoint bucket), verified
+  # against the hash the generate leg reported, and reports parse validity and schema errors for the
+  # reference, the base model and the candidate, and the candidate's rates against the base model's.
+  # No GPU; it runs on the box because the samples are there. It never gates.
+  - id: ifc
+    label: IFC validity of the answers, base and candidate
+    flow: ifc-validate
+    depends_on: [generate]
+    when: input.ifc_schema != ''
+    timeout: 15m
+    with:
+      retry: {max_attempts: 2}
+      samples_path: $steps.generate.eval_generate_samples_path
+      samples_uri: $steps.generate.eval_generate_samples_uri
+      samples_sha256: $steps.generate.eval_generate_samples_sha256
+      schema_version: $input.ifc_schema
+      stub: $input.stub
+
   # ── the verdict: better than the model it started from, on the same rows ──
   - gate: improved
-    depends_on: [train, eval]
+    depends_on: [train, eval, generate, ifc]
     predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
 
   # ── the PERSON gate on the model ──────────────────────────────────────────
@@ -224,6 +277,30 @@ steps:
       - eval.eval_lm_eval_delta_mmlu_acc
       - eval.eval_lm_eval_delta_mmlu_acc_stderr
       - eval.eval_lm_eval_results_uri
+      # the generate leg (#41): the models' own answers to held-out prompts, scored against the
+      # references; every answer is in its samples file (`samples_uri`)
+      - generate.eval_generate_checked
+      - generate.eval_generate_note
+      - generate.eval_generate_samples
+      - generate.eval_generate_base_exact_match
+      - generate.eval_generate_candidate_exact_match
+      - generate.eval_generate_delta_exact_match
+      - generate.eval_generate_base_contains
+      - generate.eval_generate_candidate_contains
+      - generate.eval_generate_delta_contains
+      - generate.eval_generate_samples_uri
+      # the ifc leg (#12), when it ran: parse validity and schema errors of the answers
+      - ifc.eval_ifc_validate_checked
+      - ifc.eval_ifc_validate_note
+      - ifc.eval_ifc_validate_schema_version
+      - ifc.eval_ifc_validate_reference_parse_valid_rate
+      - ifc.eval_ifc_validate_base_parse_valid_rate
+      - ifc.eval_ifc_validate_candidate_parse_valid_rate
+      - ifc.eval_ifc_validate_delta_parse_valid_rate
+      - ifc.eval_ifc_validate_base_schema_error_rate
+      - ifc.eval_ifc_validate_candidate_schema_error_rate
+      - ifc.eval_ifc_validate_delta_valid_rate
+      - ifc.eval_ifc_validate_results_uri
 
   # ── tag the adapter (an operator-declared gate) ───────────────────────────
   - id: promote
@@ -245,4 +322,5 @@ outputs:
   eval_results: eval.eval_lm_eval_results_uri
   test_loss_base: eval.eval_lm_eval_base_test_loss
   test_loss: eval.eval_lm_eval_candidate_test_loss
+  generation_samples: generate.eval_generate_samples_uri
   promoted: promote.artifact_id

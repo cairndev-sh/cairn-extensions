@@ -1,8 +1,8 @@
 # cairn-operator-eval-lm
 
 Classic public benchmarks (EleutherAI **lm-evaluation-harness**) for
-[cairn](https://github.com/cairndev-sh/cairn), with the task lists shipped as **pack data**, in two
-shapes:
+[cairn](https://github.com/cairndev-sh/cairn), with the task lists shipped as **pack data**, and the
+models' own answers to held-out prompts, in three shapes:
 
 - `eval/lm-eval` (an operator) — provides capability **`eval.lm_eval`**. Runs a task preset against
   a candidate that is **already served** behind an OpenAI-compatible endpoint (a vLLM server, for
@@ -17,6 +17,13 @@ shapes:
   the leg when the projected run does not fit the leg's timeout. `cairn-pack-finetune` runs it
   after training (`finetune/sft`'s `eval` leg) and on an adapter you already have
   (`finetune/eval-adapter`).
+- `eval.generate` (a flow-stage kernel, same group) — runs **on the GPU box** on the same loading
+  code: draws `sample_n` prompts from a held-out test split with a seed, has the base model and then
+  base + adapter answer them (the chat template the adapter was trained with, greedy decoding),
+  scores both against the references with the baseline scorers (`exact_match`, `contains`), and
+  writes every prompt, reference and answer to a samples file (the stage's report artifact) that a
+  validator stage can read. The first batch projects the run and refuses it past the leg's timeout.
+  `cairn-pack-finetune` runs it as `finetune/sft`'s `generate` leg.
 
 Task presets live in `src/operator_eval_lm/presets/*.toml` — `smoke` (the operator's default;
 minutes), `reasoning`, `knowledge`, and for the stage `forgetting` (ARC-Easy, ARC-Challenge,
@@ -56,7 +63,7 @@ CI does not check that resolution yet.
 | Extra | What it is for |
 |---|---|
 | `harness` | `lm-eval>=0.4.10,<0.4.14`, the harness itself, for the `eval/lm-eval` operator: the releases the pack's harness seam was read against (they take an explicit request header, so the endpoint key never comes from the process environment). Heavy (torch, datasets): install it only where benchmarks run. It downloads task datasets into the Hugging Face cache. |
-| `box` | `lm-eval[hf,ifeval]` in the same range, and boto3: the `eval.lm_eval` stage on the GPU box (lm-eval's `hf` backend, IFEval's checkers, S3 for the splits, an `s3://` adapter and the results file). Install it beside `cairn-operator-training[gpu]`. The box downloads the base model and the task datasets from the Hugging Face Hub (or reads its cache). No endpoint and no key: the stage reads no secret and writes nothing to the process environment. |
+| `box` | `lm-eval[hf,ifeval]` in the same range, and boto3: the `eval.lm_eval` and `eval.generate` stages on the GPU box (lm-eval's `hf` backend, IFEval's checkers, S3 for the splits, an `s3://` adapter and the results file). Install it beside `cairn-operator-training[gpu]`. The box downloads the base model and the task datasets from the Hugging Face Hub (or reads its cache). No endpoint and no key: the stage reads no secret and writes nothing to the process environment. |
 | `test` | `moto[s3]`, for this package's tests. |
 
 The base install pins `cairndev>=0.3.1,<0.4`.
@@ -73,6 +80,8 @@ the first live run must check.
 | A real harness call against a served endpoint | not yet proven |
 | `eval.lm_eval` stage logic: identical calls for both models, deltas and standard errors, the split loss, the time probe and its refusal, the results file and its upload, the failure paths | tested in CI on the released `cairndev`, against a faked backend (`tests/test_eval_stage.py`) and through `cairn-pack-finetune`'s pipelines on the core's launch door and bridge |
 | The stage's real backend (torch, transformers 5.5, peft, lm-eval 0.4.13 `hf`) on a GPU | not yet proven: read against the sources, never run (`DESIGN.md` §7) |
+| `eval.generate` stage logic: the seeded draw, the same prompts and decoding for both models on one loaded base, the scorers and deltas, the first-batch projection and its refusal, the samples file and its upload, the failure paths, the stub tier | tested in CI on the released `cairndev`, against a faked backend (`tests/test_generate_stage.py`) and through `cairn-pack-finetune`'s pipelines on the core's launch door and bridge |
+| `eval.generate`'s real generation (`HfBackend.generate`: greedy `model.generate`, left padding, end-of-turn stops) on a GPU | not yet proven: never run |
 
 [`docs/sft-integration.md`](docs/sft-integration.md) is the design the stage implements (option b).
 

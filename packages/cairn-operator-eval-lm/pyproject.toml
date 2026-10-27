@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-eval-lm"
-version = "0.2.0"
-description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, and the eval.lm_eval flow stage that scores a base model and its adapter on the GPU box; task presets as pack data."
+version = "0.3.0"
+description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate; the eval.lm_eval flow stage that scores a base model and its adapter on the GPU box, and eval.generate, their answers to held-out prompts; task presets as pack data."
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{name = "cairn maintainers"}]
@@ -52,6 +52,9 @@ test = ["moto[s3]>=5"]
 # the base model and base + adapter scored in process, as an ml leg a domain pack's flow names.
 [project.entry-points."cairn.flow_stages"]
 "eval.lm_eval" = "operator_eval_lm.flow_stages:eval_lm_eval"
+# cairn-extensions#41 — the generation eval: answers to held-out prompts from the base model and the
+# candidate, scored and written as a samples file a validator stage can read.
+"eval.generate" = "operator_eval_lm.generate_stage:eval_generate"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/operator_eval_lm"]

@@ -1,4 +1,4 @@
-"""Configuration of the ``eval.lm_eval`` flow stage (cairn-extensions#42).
+"""Configuration of the ``eval.lm_eval`` (cairn-extensions#42) and ``eval.generate`` (#41) flow stages.
 
 A flow stage takes a flat config dict (``$config.*`` substituted, absent keys omitted); this model
 validates it, so a typo'd method or a negative budget fails before a model loads. Uncontracted
@@ -46,4 +46,32 @@ class EvalStageConfig(BaseModel):
                                           "never `checked`.")
 
 
-__all__ = ["DEFAULT_STAGE_PRESET", "EvalStageConfig"]
+class GenerateStageConfig(BaseModel):
+    """``eval.generate``: answers to held-out prompts from the base model and the candidate."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    base_model: str = Field(..., min_length=1, description="Hugging Face id (or path) of the base model.")
+    adapter_uri: str = Field("", description="The adapter, as for eval.lm_eval: s3://…/ prefix, hf://<repo>, "
+                                             "a Hub id or a path on the box.")
+    local_adapter_dir: str = Field("", description="The train leg's adapter directory on this box; used "
+                                                   "first when it exists.")
+    method: Literal["qlora", "lora"] = Field("qlora", description="qlora: the base is loaded in 4 bit, as "
+                                                                  "it was trained; lora: float16.")
+    test_uri: str = Field("", description="The test split the prompts come from, as the control plane "
+                                          "resolved it (<location>#sha256=<hash>). Required.")
+    sample_n: int = Field(50, gt=0, description="Prompts drawn from the test split (all of them when it has "
+                                                "fewer usable rows), the same ones for both models.")
+    seed: int = Field(1234, description="Draws the prompts and seeds the generation, the same for both models.")
+    max_new_tokens: int = Field(512, gt=0, description="The longest answer, in tokens.")
+    batch_size: int = Field(8, gt=0, description="Prompts generated together.")
+    max_seq_len: int = Field(2048, gt=0, description="A prompt longer than this many tokens keeps its end.")
+    time_budget_s: float = Field(0.0, ge=0.0, description="The leg's timeout in seconds; the first batch's "
+                                                          "time projects the run and refuses one past it. "
+                                                          "Required outside the stub tier.")
+    time_margin: float = Field(0.1, ge=0.0, lt=1.0, description="Fraction of the budget kept back.")
+    stub: bool = Field(False, description="The stub tier: no model is loaded; placeholder answers, never "
+                                          "`checked`.")
+
+
+__all__ = ["DEFAULT_STAGE_PRESET", "EvalStageConfig", "GenerateStageConfig"]

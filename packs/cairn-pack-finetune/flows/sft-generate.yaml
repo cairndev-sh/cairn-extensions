@@ -1,0 +1,42 @@
+# flows/sft-generate.yaml — the base model's and the candidate's answers to held-out prompts, as one
+# governed ml leg on the GPU box (cairn-extensions#41). The stage is cairn-operator-eval-lm's
+# `eval.generate` kernel; the profile's ml engine decides where the leg runs (`ml_target`), never
+# this file. `finetune/sft` runs it after `eval`.
+#
+# One stage, so a retried leg starts again: there is nothing to resume from.
+#
+# `test_uri` arrives as a registered `dataset:` ref, which the control plane resolves to its location
+# pinned by hash; the stage verifies the bytes before it reads a row. `time_budget_s` must be the
+# leg's `timeout:` in seconds (the pipelines' tests hold the two equal): the first batch's time
+# projects the run and refuses one past it.
+#
+# The answers are written as a samples file (prompt, reference, base answer, candidate answer, the
+# baseline scores), the stage's report product: a validator leg on the same box (`ifc-validate`)
+# reads it.
+#
+# `$config.<key>` with no value is omitted, so the stage's default applies.
+
+name: sft-generate
+kind: ml
+description: >
+  Answer sample_n prompts from the held-out test split with the base model and with the base model
+  plus the adapter (same 4-bit loading, chat template, seed and greedy decoding), score both against
+  the references (exact match, contains), and keep the answers as a samples file.
+
+stages:
+  - stage: eval.generate
+    config:
+      base_model: $config.base_model
+      adapter_uri: $config.adapter_uri
+      local_adapter_dir: $config.local_adapter_dir
+      method: $config.method
+      test_uri: $config.test_uri
+      sample_n: $config.sample_n
+      seed: $config.seed
+      max_new_tokens: $config.max_new_tokens
+      batch_size: $config.batch_size
+      max_seq_len: $config.max_seq_len
+      time_budget_s: $config.time_budget_s
+      stub: $config.stub
+    resources:
+      gpu: 1

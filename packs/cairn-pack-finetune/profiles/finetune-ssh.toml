@@ -3,7 +3,7 @@
 # qualification run is cairn-extensions#9. The pack README's "Run it" walks through every step.
 #
 # The control plane (runs the engine, the data leg and the gates, and starts and stops the box;
-# no torch). cairn-pack-finetune 0.2.0 needs cairndev 0.3.1 or later (compute/acquire,
+# no torch). cairn-pack-finetune 0.2.0 and later need cairndev 0.3.1 or later (compute/acquire,
 # compute/release and the GPU estimate):
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
@@ -19,15 +19,15 @@
 #
 # The GPU box (runs `cairn-dataflow-run`, the trainer and the evaluation only; no engine, no worker):
 #
-#     pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]'   # + ',track-mlflow' with report_to: [mlflow]
+#     pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]' 'cairn-operator-ifc-eval[box]'   # + ',track-mlflow' with report_to: [mlflow]
 #     # and the same cairn-contracts-training* versions as the control plane (the engine checks
 #     # the flow's stages against the control plane's registry; the box must run the same ones)
 #
 # To run unreleased changes, install from a checkout of cairn-extensions instead
 # (`pip install ./packages/… ./packs/…`).
 #
-#   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after `eval`
-#     and again, as a finalizer, on every outcome (`compute/release`). The connection must name an
+#   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after its last
+#     box leg and again, as a finalizer, on every outcome (`compute/release`). The connection must name an
 #     EC2 instance (`instance_id`, `region`; an Elastic IP keeps `host` stable across a stop), and
 #     the control plane needs boto3 (a dependency of cairn-pack-finetune) and AWS credentials that
 #     allow ec2:DescribeInstances, ec2:CreateTags, ec2:StartInstances and ec2:StopInstances on it.
