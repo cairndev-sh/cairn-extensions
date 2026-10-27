@@ -3,7 +3,7 @@
 # qualification run is cairn-extensions#9. The pack README's "Run it" walks through every step.
 #
 # The control plane (runs the engine, the data leg and the gates, and starts and stops the box;
-# no torch). cairn-pack-finetune 0.1.1 needs cairndev 0.3.1 or later (compute/acquire,
+# no torch). cairn-pack-finetune 0.1.2 needs cairndev 0.3.1 or later (compute/acquire,
 # compute/release and the GPU estimate):
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
@@ -75,6 +75,19 @@
 
 [profile]
 visibility = "public"
+
+[profile.bindings]
+# The hash-chained audit log (the builtin cairn-operator-audit-store that ships with cairndev).
+# Without it, the events the core sends to the audit sink are dropped (NullAuditSink) and
+# `cairn doctor --strict` fails. Under cairndev 0.3.1 the core writes a refused gate decision,
+# template-path approvals and licence acceptance, LLM and MCP calls there; a pipeline's gate
+# approvals, box start and stop and promotion are recorded on the run record instead
+# (cairndev-sh/cairn#233). CAIRN_AUDIT_LOG sets the file (default `audit.jsonl` in the engine's
+# working directory): one file per engine process, on durable disk.
+"audit.sink" = "audit/store"
+# Redaction before anything leaves for an LLM vendor (the builtin cairn-operator-redact-regex).
+# `sft` makes no LLM calls; bound so the profile is complete and `cairn doctor --strict` passes.
+"redact.text" = "redact/text"
 
 [profile.backends]
 dataflow_engine  = "builtin"  # dataset-prep/prepare's data leg, on the control plane's box

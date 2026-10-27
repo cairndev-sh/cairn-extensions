@@ -11,7 +11,7 @@
 
 [pack]
 name        = "finetune"
-version     = "0.1.1"
+version     = "0.1.2"
 description = "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person."
 tags = [
     "domain:modelops",
