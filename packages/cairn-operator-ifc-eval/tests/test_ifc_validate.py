@@ -238,9 +238,14 @@ def test_the_stub_tier_is_scored_and_never_checked(tmp_path):
     assert out["checked"] is False and "placeholders" in out["note"] and out["candidate_parse_valid_rate"] == 0.0
 
 
+def test_no_samples_named_is_not_evaluated_not_a_failure(tmp_path):
+    """The generate leg writes no samples when its own harness is missing or fails (it reports
+    `checked: false`); the wire then names nothing, and this leg says so instead of failing the run."""
+    out = flow_stages.eval_ifc_validate(tmp_path / "job", {"samples_path": "", "samples_uri": ""}, [])
+    assert out["checked"] is False and "no samples file named" in out["note"] and "output" not in out
+
+
 def test_a_missing_or_changed_samples_file_fails_the_leg(tmp_path):
-    with pytest.raises(box_io.FetchError, match="no samples file"):
-        flow_stages.eval_ifc_validate(tmp_path / "job", {}, [])
     with pytest.raises(box_io.FetchError, match="is not a file on this box"):
         flow_stages.eval_ifc_validate(tmp_path / "job", {"samples_uri": str(tmp_path / "gone.jsonl")}, [])
     path, digest = _generation(tmp_path)

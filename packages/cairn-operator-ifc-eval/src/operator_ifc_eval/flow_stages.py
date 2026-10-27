@@ -18,9 +18,10 @@ What it reports, as stats (the leg's findings, ``eval_ifc_validate_<key>``): per
 failures, uploaded beside the run's checkpoints when ``CAIRN_CHECKPOINT_BUCKET`` is set and
 registered as the stage's ``report`` product.
 
-What fails the leg: no samples file, a file whose bytes are not the ones the generate leg reported,
-an unknown schema. What does not: IfcOpenShell missing on the box (``checked: false`` with the
-reason and no rate). It never gates: a pipeline predicate or a person reads the rates.
+What fails the leg: a samples file that is named but cannot be read, a file whose bytes are not the ones the generate leg reported,
+an unknown schema. What does not: IfcOpenShell missing on the box, or no samples file named (the generate leg wrote
+none because its own harness was missing or failed): ``checked: false`` with the reason and no
+rate. It never gates: a pipeline predicate or a person reads the rates.
 """
 from __future__ import annotations
 
@@ -58,6 +59,11 @@ def eval_ifc_validate(workdir: Path, config: dict, inputs: list[str]) -> dict:
     workdir.mkdir(parents=True, exist_ok=True)
     cfg = IfcStageConfig.model_validate({k: v for k, v in (config or {}).items() if v is not None})
     fields = [f.strip() for f in cfg.fields.split(",") if f.strip()]
+    if not cfg.samples_path and not cfg.samples_uri:
+        # the generate leg wrote no samples (its harness was missing or failed: it says why); its
+        # evaluation is "not evaluated", and so is this one, never a failed run
+        return {"stub": cfg.stub, "schema_version": cfg.schema_version, "fields": ",".join(fields), "rows": 0,
+                "checked": False, "note": "no samples file named: the generate leg wrote none (see its note)"}
     path = box_io.fetch_samples(local_path=cfg.samples_path, uri=cfg.samples_uri, dest_dir=workdir / "samples",
                                 sha256=cfg.samples_sha256)
     rows = _rows(path)
