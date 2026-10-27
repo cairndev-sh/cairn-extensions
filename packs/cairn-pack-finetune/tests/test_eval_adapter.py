@@ -193,6 +193,8 @@ async def test_the_stub_evaluation_runs_on_the_box_and_stops_at_evaluated(env, m
         assert env.timeline == [], "no box before the approval"
         (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
         assert card["evidence"]["estimate_usd"] == pytest.approx(7.92)
+        # Listed for the approver; its VALUE reads None under cairndev 0.3.1 (show: resolves step
+        # outputs only, cairndev-sh/cairn#236), so only the field's presence is asserted here.
         assert "input.adapter_uri" in card["fields"]
         await b.advance_step(pid, "approve-run", approver="ml-owner")
         rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))

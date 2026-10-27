@@ -197,6 +197,13 @@ def eval_lm_eval(workdir: Path, config: dict, inputs: list[str]) -> dict:
         return _not_checked(settings, f"harness unavailable (install cairn-operator-eval-lm[box] on the "
                                       f"box): {e}", started)
     settings["harness_backend"] = backend.name
+    check = getattr(backend, "check_adapter", None)
+    if check is not None:
+        try:
+            check(adapter)
+        except Exception as e:  # noqa: BLE001 — a missing adapter fails the leg before any model loads
+            raise box_io.FetchError(f"adapter {adapter!r} ({adapter_source}) can't be read: "
+                                    f"{type(e).__name__}: {e}") from e
     try:
         m = _measure(cfg, preset, plan, batch, rows, adapter, backend, settings, started)
     except (TimeBudgetExceeded, box_io.FetchError):
@@ -265,12 +272,13 @@ def _measure(cfg, preset, plan, batch: int, rows: dict, adapter: str, backend, s
         per_task = ", ".join(f"{p.task} {p.projected_s(batch) / 60:.0f}+{p.projected_s(batch, CANDIDATE_FACTOR) / 60:.0f} min "
                              f"({p.full_documents} documents; probe {p.documents} in {p.wall_s:.0f}s)"
                              for p in probes)
+        # The headline goes LAST: the remote job keeps only the tail of its log as the run's error.
         raise TimeBudgetExceeded(
-            f"{STAGE} refused before the full run: projected {projected / 3600:.2f} h > {allowed / 3600:.2f} h "
-            f"(the leg's {cfg.time_budget_s / 3600:g} h less a {cfg.time_margin:.0%} margin). Base + candidate "
-            f"per task: {per_task}; split loss {split_s * (1 + CANDIDATE_FACTOR) / 60:.0f} min; "
-            f"{so_far / 60:.0f} min spent loading and probing. Lower the preset's limits, or give the leg a "
-            f"longer timeout (and budget).")
+            f"Base + candidate per task: {per_task}; split loss {split_s * (1 + CANDIDATE_FACTOR) / 60:.0f} "
+            f"min; {so_far / 60:.0f} min spent loading and probing. Lower the preset's limits, or give the "
+            f"leg a longer timeout (and budget). {STAGE} refused before the full run: projected "
+            f"{projected / 3600:.2f} h > {allowed / 3600:.2f} h (the leg's {cfg.time_budget_s / 3600:g} h "
+            f"less a {cfg.time_margin:.0%} margin).")
 
     # ── 4–5. the two passes, identical calls ────────────────────────────────────────────────
     def scored_pass(model) -> tuple[dict, dict]:

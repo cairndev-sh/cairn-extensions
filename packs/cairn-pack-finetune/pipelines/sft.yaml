@@ -13,8 +13,10 @@
 #   * the base model's licence.
 # The decision is on the pipeline record and on the first gate's card.
 #
-#   * `approve-run` — a person reads the admission, the run's settings and the GPU estimate
-#     (`estimate_usd`, `estimate_basis` in the gate's evidence) before GPU time is spent.
+#   * `approve-run` — a person reads the admission and the GPU estimate (`estimate_usd`,
+#     `estimate_basis` in the gate's evidence) before GPU time is spent. The `input.*` fields under
+#     `show:` read empty under cairndev 0.3.1 (cairndev-sh/cairn#236); the launched inputs are on the
+#     pipeline record.
 #   * `acquire` — `compute/acquire` starts the EC2 instance `compute_connection` names, after the
 #     approval: it stamps the `cairn:managed` / `cairn:release-after` lease first, then starts the
 #     box and waits for SSH (ADR-0151 D8, D11).

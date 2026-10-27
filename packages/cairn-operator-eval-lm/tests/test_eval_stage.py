@@ -51,10 +51,11 @@ class FakeBackend:
 
     def __init__(self, clock: Clock, *, per_batch_s: float = 0.0, overhead_s: float = 0.0,
                  candidate_factor: float = 1.0, scores: dict | None = None, fail_on: str = "",
-                 adapter_base: str = "") -> None:
+                 adapter_base: str = "", missing_adapter: bool = False) -> None:
         self.clock, self.per_batch_s, self.overhead_s = clock, per_batch_s, overhead_s
         self.candidate_factor, self.scores, self.fail_on = candidate_factor, scores or {}, fail_on
         self._adapter_base = adapter_base
+        self.missing_adapter = missing_adapter
         self.calls: list[tuple] = []
         self.loss_calls: list[tuple] = []
         self.loads: list[tuple] = []
@@ -72,6 +73,10 @@ class FakeBackend:
 
     def adapter_base(self, adapter: str) -> str:
         return self._adapter_base
+
+    def check_adapter(self, adapter: str) -> None:
+        if self.missing_adapter:
+            raise OSError(f"{adapter} does not appear to have a file named adapter_config.json")
 
     def render(self, loaded: Loaded, messages: list[dict], template: str) -> str:
         return template + "|" + "|".join(f"{m['role']}:{m['content']}" for m in messages)
@@ -468,3 +473,25 @@ def test_task_scores_read_a_groups_aggregate_its_stderr_and_direction():
     assert [(s.key, s.stderr) for s in gsm] == [("exact_match_flexible-extract", None),
                                                  ("exact_match_strict-match", None)]
     assert scoring.documents(results, 10) == (15, 15) and scoring.documents(results, 0) == (15, 105)
+
+
+def test_a_missing_adapter_fails_before_any_model_loads(tmp_path, clock, monkeypatch):
+    """A typo'd Hub id or path is found by reading the adapter's config (a few KB) first: the leg
+    fails in seconds, with no base load, no probe and no pass (#45 review N4)."""
+    fake = FakeBackend(clock, missing_adapter=True)
+    _use(monkeypatch, fake)
+    with pytest.raises(box_io.FetchError) as failed:
+        _run(tmp_path)
+    assert "can't be read" in str(failed.value)
+    assert fake.loads == [] and fake.calls == [] and fake.attached == []
+
+
+def test_the_refusal_headline_survives_the_log_tail(tmp_path, clock, monkeypatch):
+    """The remote job keeps only the last 500 characters of its log as the run's error, so the
+    projected-vs-allowed headline is the END of the message (#45 review N5)."""
+    fake = FakeBackend(clock, per_batch_s=10.0)
+    _use(monkeypatch, fake)
+    with pytest.raises(flow_stages.TimeBudgetExceeded) as refused:
+        _run(tmp_path)
+    tail = str(refused.value)[-500:]
+    assert "refused before the full run" in tail and "> 2.70 h" in tail

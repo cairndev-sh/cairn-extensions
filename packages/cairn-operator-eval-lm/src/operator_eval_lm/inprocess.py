@@ -35,7 +35,7 @@ from operator_eval_lm import harness
 
 #: ChatML, the template the trainer gives a base model's tokenizer that has none
 #: (``cairn-operator-training``'s ``chat_template.CHATML``; a copy, because an operator pack never
-#: imports another — ``cairn-pack-finetune``'s tests hold the two equal).
+#: imports another — this pack's ``test_the_chatml_copy_is_the_trainers`` holds the two equal).
 CHATML = (
     "{% for message in messages %}"
     "{{ '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n' }}"
@@ -80,6 +80,8 @@ class Backend(Protocol):
     def chat_template(self, loaded: Loaded, adapter: str) -> tuple[str, str]: ...
 
     def adapter_base(self, adapter: str) -> str: ...
+
+    def check_adapter(self, adapter: str) -> None: ...
 
     def render(self, loaded: Loaded, messages: list[dict], template: str) -> str: ...
 
@@ -191,6 +193,14 @@ class HfBackend:
         except Exception:  # noqa: BLE001 — unknown is reported as unknown
             return ""
 
+    def check_adapter(self, adapter: str) -> None:
+        """Raise when the adapter can't be found or read: its ``adapter_config.json`` is fetched
+        (a few KB) before the base model loads, so a typo'd Hub id or path fails in seconds instead
+        of after the whole base pass."""
+        from peft import PeftConfig  # noqa: PLC0415
+
+        PeftConfig.from_pretrained(adapter)
+
     def render(self, loaded: Loaded, messages: list[dict], template: str) -> str:
         return loaded.tokenizer.apply_chat_template(messages, tokenize=False, chat_template=template)
 
@@ -269,6 +279,9 @@ class StubBackend:
 
     def adapter_base(self, adapter: str) -> str:
         return ""
+
+    def check_adapter(self, adapter: str) -> None:
+        return None
 
     def render(self, loaded: Loaded, messages: list[dict], template: str) -> str:
         return "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)

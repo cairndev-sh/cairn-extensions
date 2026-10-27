@@ -16,8 +16,10 @@
 #     cairndev resolves `dataset:` refs in a leg's inputs but not artifact tags yet, and the box
 #     has no registry. `cairn remote findings <pl_id>` of the run that promoted it shows the URI
 #     (`promote`'s `uri`, or `train`'s `train_qlora_adapter_uri`).
-#   * `approve-run` — a person reads the settings and the GPU estimate (`estimate_usd`,
-#     `estimate_basis` in the gate's evidence) before GPU time is spent.
+#   * `approve-run` — a person reads the GPU estimate (`estimate_usd`, `estimate_basis` in the
+#     gate's evidence) before GPU time is spent. The `input.*` fields listed under `show:` are meant
+#     to show the settings, but cairndev 0.3.1 resolves `show:` from step outputs only, so they
+#     read empty until cairndev-sh/cairn#236 lands; the launched inputs are on the pipeline record.
 #   * `acquire` / `release-box` / `release` — as in `sft` (ADR-0151 D8, D9, D11): the box starts
 #     after the approval, stops right after `eval`, and the finalizer stops it on every outcome.
 #   * `eval` — a time probe first: it scores about 50 documents and refuses the leg (a clean

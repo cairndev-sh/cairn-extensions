@@ -285,7 +285,10 @@ cairn replay <run_id> --source db                   # the recorded events as a t
   attempt reserves one attempt's figure before it is submitted, so an attempt the budget cannot
   cover fails the leg instead of starting, and every attempt settles its own box time (`Run.cost.gpu_usd`),
   failed or not. Not priced: the minutes between `acquire` and `smoke` (the boot) and between
-  `eval` and `release-box`; a connection without `hourly_usd` is "not priced", never $0.
+  `eval` and `release-box`; a connection without `hourly_usd` is "not priced", never $0. The launch
+  checks the estimate against what the series has *left*, live holds included: while one `sft`
+  attempt holds its train figure ($7.92), a second `sft` launch in the same series sees $17.08 left
+  and is refused. Run one at a time, or give the series a larger budget.
 - **Cancel:** `cairn remote cancel-pipeline <pl_id>` stops the pipeline: no further leg starts.
   If `smoke`, `train` or `eval` is running on the box, its job is cancelled first (the trainer is
   killed, and the leg settles `cancelled`, not retried), then the finalizer `release` stops the

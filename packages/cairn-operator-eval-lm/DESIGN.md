@@ -134,7 +134,9 @@ an ml leg keeps every chokepoint (the launch door's estimate, the reservation an
 the box's `hourly_usd`, retry and cancel, the record). No operator pack imports another: the
 adapter arrives as a value wired from the `train` leg's findings, never by reading the training
 pack's files, and the few helpers both need (the split fetch with pin verification, the
-checkpoint-bucket location, ChatML) are small copies, held equal by tests.
+checkpoint-bucket location, ChatML) are small copies. Only ChatML is compared by a test
+(`test_the_chatml_copy_is_the_trainers`); the split fetch follows the trainer's message shapes with
+looser validation, and the results file goes under its own `eval/` key, not the trainer's layout.
 
 ```
 config (flat, $config.* substituted) → EvalStageConfig
