@@ -1,0 +1,37 @@
+# cairn-operator-ifc-eval — declarative manifest (ADR-0102 D5).
+#
+# IFC snippet validation (cairn-extensions#12): `eval/ifc-validate` checks whether generated IFC
+# snippets parse and hold to the targeted schema (IfcOpenShell, the optional [ifc] extra), and
+# reports the rates and the per-row failures. It never gates on its own.
+#
+# The same check runs on the GPU box as a flow-stage KERNEL, not an operator: `eval.ifc_validate`
+# in the `cairn.flow_stages` entry-point group (pyproject.toml) scores a generation eval's samples
+# for the base model and the candidate, as an ml leg a domain pack's pipeline names. Flow stages are
+# not listed in this manifest.
+
+[pack]
+name        = "cairn-operator-ifc-eval"
+version     = "0.1.0"
+type        = "operator"
+description = "eval/ifc-validate: do generated IFC snippets parse and hold to the targeted schema; the eval.ifc_validate stage scores a generation eval's samples for base and candidate."
+kind        = "operator"
+publisher   = "cairn"
+trust_level = "official"
+
+[compat]
+cairn_engine = ">=0.3.1,<0.4"
+
+[operator."eval/ifc-validate"]
+version       = "0.1.0"
+input_schema  = "IfcValidateInput"
+output_schema = "IfcValidateOutput"
+long_running = false
+requires_gpu = false
+supports_cancel = false
+supports_heartbeat = false
+supports_mock = false
+risk      = "read_only"
+executors = ["in_process"]
+
+[operator."eval/ifc-validate".capabilities]
+provides = ["eval.ifc_validate"]

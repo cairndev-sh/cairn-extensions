@@ -1,0 +1,10 @@
+{"expect": "valid", "why": "one IfcProject", "snippet": "#1=IFCPROJECT('3MDa0qu6X5eBFeTDmhEULg',$,'Sample Project',$,$,$,$,$,$);"}
+{"expect": "valid", "why": "a fenced block inside prose", "snippet": "Here is the placement:\n\n```ifc\n#1=IFCCARTESIANPOINT((0.,0.,0.));\n#2=IFCDIRECTION((0.,0.,1.));\n#3=IFCDIRECTION((1.,0.,0.));\n#4=IFCAXIS2PLACEMENT3D(#1,#2,#3);\n```\n\nThe axis is Z up."}
+{"expect": "valid", "why": "a whole file with its header", "snippet": "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');\nFILE_NAME('wall.ifc','2024-01-01T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n#1=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'Wall-001','A load-bearing wall',$,$,$,$,.STANDARD.);\nENDSEC;\nEND-ISO-10303-21;"}
+{"expect": "valid", "why": "a unit and its assignment", "snippet": "#10=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);\n#11=IFCUNITASSIGNMENT((#10));"}
+{"expect": "valid", "why": "a storey with an escaped quote in its name", "snippet": "#1=IFCBUILDINGSTOREY('0DWgwt6o1FOx7466fPk$jl',$,'Owner''s level',$,$,$,$,$,.ELEMENT.,0.);"}
+{"expect": "broken", "why": "an entity IFC4 does not declare", "snippet": "#1=IFCWALLX('2O2Fr$t4X7Zf8NOew3FLOH',$,$,$,$,$,$,$,$);"}
+{"expect": "broken", "why": "unbalanced parentheses", "snippet": "#1=IFCPROJECT('3MDa0qu6X5eBFeTDmhEULg',$,'Sample Project',$,$,$,$,$,$;"}
+{"expect": "broken", "why": "no '=' after the id", "snippet": "#1 IFCCARTESIANPOINT((0.,0.,0.));"}
+{"expect": "broken", "why": "prose, no IFC at all", "snippet": "A wall is a vertical element that bounds or subdivides a space."}
+{"expect": "broken", "why": "an unclosed string", "snippet": "#1=IFCPROJECT('3MDa0qu6X5eBFeTDmhEULg,$,'Sample Project',$,$,$,$,$,$);"}

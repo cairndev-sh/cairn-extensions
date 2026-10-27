@@ -27,6 +27,7 @@ The engine, the builtin operator packs and the core contracts live in
 |---|---|---|
 | [`cairn-operator-dataset-checks`](packages/cairn-operator-dataset-checks/README.md) | dataset readiness checks, cleaning stages and splits | `cairn-contracts-dataset`, `cairn-contracts-dataset-stages` |
 | [`cairn-operator-eval-lm`](packages/cairn-operator-eval-lm/README.md) | `eval/lm-eval`: lm-evaluation-harness benchmarks against a served candidate, as a scorecard; `eval.lm_eval`: a base model and its adapter scored with identical settings on the GPU box, with held-out loss and a time probe; task presets as pack data | none yet |
+| [`cairn-operator-ifc-eval`](packages/cairn-operator-ifc-eval/README.md) | `eval/ifc-validate`: do generated IFC snippets parse and hold to the targeted schema (IfcOpenShell, an extra); `eval.ifc_validate`: a generation eval's samples scored that way for the base model and the candidate on the GPU box; never gates | none yet |
 | [`cairn-operator-training`](packages/cairn-operator-training/README.md) | SFT with LoRA / QLoRA, DPO and distillation | `cairn-contracts-training`, `cairn-contracts-training-stages` |
 
 | Domain pack | What | Stages from |
@@ -38,7 +39,8 @@ The engine, the builtin operator packs and the core contracts live in
 
 Every operator and domain pack requires `cairndev` 0.2.x or 0.3.x (`cairndev>=0.2.0,<0.4`;
 `>=0.2.1` for `cairn-operator-dataset-checks` and `cairn-pack-dataset-prep`, `>=0.3.1` for
-`cairn-pack-finetune`, which starts and stops its GPU box, and for `cairn-operator-eval-lm`); the contract wheels depend on
+`cairn-pack-finetune`, which starts and stops its GPU box, and for `cairn-operator-eval-lm` and
+`cairn-operator-ifc-eval`); the contract wheels depend on
 nothing. CI proves each wheel on the newest released `cairndev` its pins select. Once published, each installs by name:
 
 ```bash
@@ -56,6 +58,7 @@ pip install ./packages/cairn-contracts-dataset ./packages/cairn-contracts-datase
 pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages \
   ./packages/cairn-operator-training
 pip install ./packages/cairn-operator-eval-lm    # benchmarks; cairn-pack-finetune's evaluation stage
+pip install './packages/cairn-operator-ifc-eval[ifc]'   # IFC snippet validation
 pip install ./packs/cairn-pack-dataset-prep ./packs/cairn-pack-finetune
 cairn doctor && cairn pack check
 ```
@@ -111,7 +114,7 @@ tests declares them in a `test` extra, which CI installs.
 
 ## Status
 
-Three operator packs (`eval-lm` is experimental: proven against a faked harness and a faked in-process backend only), the
+Four operator packs (`eval-lm` is experimental: proven against a faked harness and a faked in-process backend only; `ifc-eval` is proven on a fixture, not yet on a GPU box), the
 four contract wheels and two domain packs (`dataset-prep`, `finetune`) are on `main`, tested in CI against the newest released `cairndev` in range. Their support
 tables (in each README) say which paths have been re-proven on a public release. The first PyPI
 release is next (#10); the GPU qualification run of `finetune/sft` is #9.

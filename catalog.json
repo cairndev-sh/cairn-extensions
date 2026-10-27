@@ -86,6 +86,27 @@
       }
     },
     {
+      "ref": "cairn-operator-ifc-eval",
+      "kind": "operator_pack",
+      "version": "0.1.0",
+      "trust": "official",
+      "description": "eval/ifc-validate: do generated IFC snippets parse and hold to the targeted schema; the eval.ifc_validate stage scores a generation eval's samples for base and candidate.",
+      "operators": [
+        "eval/ifc-validate"
+      ],
+      "provides": [
+        "eval.ifc_validate"
+      ],
+      "executors": [
+        "in_process"
+      ],
+      "gpu": false,
+      "install": {
+        "index": "pypi",
+        "name": "cairn-operator-ifc-eval"
+      }
+    },
+    {
       "ref": "cairn-operator-training",
       "kind": "operator_pack",
       "version": "0.1.0",
