@@ -73,7 +73,7 @@ Two machines: the **control plane** (the engine, the data leg, the gates and eve
 torch) and a **GPU box** reached over SSH, which runs only the trainer. Every command below is
 the `cairn` CLI; `<pl_id>` is a pipeline id (`pl_…`), `<run_id>` one leg's run.
 
-**Which cairndev.** This pack (0.1.1) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
+**Which cairndev.** This pack (0.1.2) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
 `compute/acquire` and `compute/release`, prices a leg on a box with `hourly_usd`, and cancels the
 job on the box before a cancelled pipeline's release stops it. CI proves it on the newest release
 in that range.
@@ -118,7 +118,7 @@ with the reason; `cairn pipeline run` exits 3). Use `inprocess` (the default) or
 cairn ls finetune                                  # lists profiles/finetune-ssh.toml with its installed path
 export CAIRN_PROFILE=<that path>
 export CAIRN_ARTIFACT_S3_BUCKET=<bucket>           # the registered dataset versions (CAIRN_ARTIFACT_S3_PREFIX optional)
-export CAIRN_AUDIT_LOG=$HOME/.cairn/audit.jsonl     # the profile binds the hash-chained audit trail here (default: ./audit.jsonl)
+export CAIRN_AUDIT_LOG=$HOME/.cairn/audit.jsonl     # the profile's hash-chained audit log: one file per engine process (default: ./audit.jsonl)
 export GPU_SSH_KEY="$(cat ~/.ssh/id_ed25519)"      # read by the engine; cairn never writes it to disk
 cairn connect add ssh --name gpu --set host=<box> --set user=<user> \
   --set known_hosts=$HOME/.ssh/known_hosts --secret PRIVATE_KEY=GPU_SSH_KEY \
@@ -281,7 +281,8 @@ under an unknown one, `holdout` included.
 records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` and must reach the
 URI. **On one machine:** use `finetune/sft-own-box` (`sft` needs an EC2 instance to start and
 stop) with the default profile and no ssh settings; dataset-prep still registers its versions
-through the s3 store.
+through the s3 store. The default profile binds no audit sink: bind `"audit.sink" = "audit/store"`
+in your own profile, or use the core `secure` profile, to keep the audit log.
 
 ## Presets and profiles
 

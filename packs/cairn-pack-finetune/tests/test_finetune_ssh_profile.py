@@ -155,9 +155,19 @@ def test_the_header_names_what_a_deployment_must_set(needle):
     assert needle in header
 
 
-def test_the_profile_binds_the_audit_sink():
-    """The governed run keeps a hash-chained audit trail (cairn-extensions#38): `audit.sink` is
-    bound to the builtin audit store, not left to the NullAuditSink that drops every event."""
+def test_the_profile_binds_the_audit_sink(tmp_path, monkeypatch):
+    """The governed run keeps a hash-chained audit log (cairn-extensions#38): `audit.sink` is bound
+    to the builtin audit store and resolves to it through the core, not to the NullAuditSink that
+    drops every event; `redact.text` is bound too, so `cairn doctor --strict` has nothing unbound."""
+    from cairn.core.obs.audit import get_audit_sink, reset_audit_sink
     from cairn.core.pack.profile import load_profile_from_env
 
-    assert dict(load_profile_from_env().bindings).get("audit.sink") == "audit/store"
+    bindings = dict(load_profile_from_env().bindings)
+    assert bindings.get("audit.sink") == "audit/store"
+    assert bindings.get("redact.text") == "redact/text"
+    monkeypatch.setenv("CAIRN_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    reset_audit_sink()
+    try:
+        assert type(get_audit_sink()).__name__ == "AuditStoreOp"
+    finally:
+        reset_audit_sink()
