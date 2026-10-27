@@ -1,9 +1,10 @@
 # cairn-operator-eval-lm — design
 
 - **Distribution:** `cairn-operator-eval-lm` (`packages/cairn-operator-eval-lm/` in cairndev-sh/cairn-extensions)
-- **Capabilities provided:** `eval.lm_eval`
-- **Status:** experimental — proven against a faked harness; never yet run
-  against a real served model (needs a GPU box, see §7)
+- **Capabilities provided:** `eval.lm_eval` (the operator); the `eval.lm_eval` flow-stage kernel
+  (`cairn.flow_stages`, §3a)
+- **Status:** experimental — proven against a faked harness and a faked in-process backend; never
+  yet run against a real served model or on a GPU box (§7)
 - **Decisions:** ADR-0102 D5 (evaluation after training), ADR-0103 (operator reporting),
   ADR-0068/0070 (config scoping), ADR-0125 (in-process leg liveness), ADR-0143 D3 (a tenant's
   secrets never reach the process environment), ADR-0128 D5 (what an extension may import) — all in
@@ -123,6 +124,83 @@ A decontaminated score keeps lm-eval's `_decontaminate` suffix in its metric
 name all the way into the flat map, so it can never collide with the
 contaminated number a gate is thresholding.
 
+## 3a. The on-box stage `eval.lm_eval` (cairn-extensions#42)
+
+The in-process shape `docs/sft-integration.md` recommends (option b): a **flow-stage kernel** in
+this package (`flow_stages.eval_lm_eval`, entry point `eval.lm_eval` in `cairn.flow_stages`), which
+a domain pack's ml flow names (`cairn-pack-finetune`'s `sft-eval`) and runs as its own ml leg on
+the GPU box. It is not an operator: the ml engine resolves kernels from the flow-stage group, and
+an ml leg keeps every chokepoint (the launch door's estimate, the reservation and settlement of
+the box's `hourly_usd`, retry and cancel, the record). No operator pack imports another: the
+adapter arrives as a value wired from the `train` leg's findings, never by reading the training
+pack's files, and the few helpers both need (the split fetch with pin verification, the
+checkpoint-bucket location, ChatML) are small copies. Only ChatML is compared by a test
+(`test_the_chatml_copy_is_the_trainers`); the split fetch follows the trainer's message shapes with
+looser validation, and the results file goes under its own `eval/` key, not the trainer's layout.
+
+```
+config (flat, $config.* substituted) → EvalStageConfig
+  → splits: fetch (path | file:// | s3://), verify the #sha256 pin, read rows
+  → adapter: the train leg's dir on this box | s3://…/ (downloaded) | hf://repo | Hub id | path
+  → Backend (inprocess.py): load the base once (4-bit nf4 for qlora; a pre-quantised checkpoint as is)
+  → time probe: ~50 documents on the base (in proportion to the preset's limits) + 8 loss rows
+       → projection = so far + Σ tasks (batches × s/batch + lm-eval overhead) × (1 + 1.25) + loss
+       → over (time_budget_s × (1 − time_margin))?  raise TimeBudgetExceeded (the leg fails cleanly)
+  → base pass: one simple_evaluate per task (HFLM over the loaded model), split loss
+  → attach the adapter to the same weights (peft) → candidate pass: the same calls, split loss
+  → per task/metric: base, candidate (± stderr), delta (± √(se_b² + se_c²)), documents
+  → worst delta and regressions (delta below −its standard error, in the metric's direction)
+  → lm_eval_results.json → s3://<CAIRN_CHECKPOINT_BUCKET>/<prefix>/<run>/eval/ (when set)
+  → flat stats (the leg's findings, eval_lm_eval_<key>) + the `report` product (output, content_hash)
+```
+
+**Identical settings.** One process, one loaded base: the candidate is the base with the adapter
+attached, so both passes share the weights, the quantisation, the tokenizer, the harness release,
+the task list, the per-task limits (MMLU's per subject), the few-shot count, the batch size and the
+four seeds lm-eval takes (python, numpy, torch, few-shot). The seam refuses a `simple_evaluate`
+that does not take `limit`, `num_fewshot` or a seed.
+
+**The time probe** exists because a hand-run of these benchmarks (cairn-extensions#9) was
+under-estimated about 3×. lm-eval's own work (building tasks, downloading datasets, metrics) is
+timed apart from the model's: the backend wraps the loaded `HFLM`'s request methods
+(`loglikelihood`, `loglikelihood_rolling`, `generate_until`; 0.4.13 `evaluator.py` 600 calls them by
+name) and counts requests and seconds. The model's time is scaled by batches (a fixed batch size
+per preset, so the arithmetic holds; the probe's batches are part-full, so it over-estimates), the
+overhead is counted once per pass, and the candidate is priced 1.25× the base (the LoRA matmuls).
+A refusal names the projection per task and what to change.
+
+**The split loss** is one method for both models, named on the record (`split_loss_method`):
+full-sequence mean token NLL, each row rendered with the chat template the adapter was trained with
+(its saved tokenizer's; else the trainer's rule), one row per forward pass (no padding, no
+packing), truncated at `max_seq_len`. It is not the trainer's `eval_loss`, which batches and pads.
+
+**The base model.** `base_model` is loaded as given. Under 4-bit loading Unsloth substitutes a
+pre-quantised checkpoint (`unsloth/<model>-unsloth-bnb-4bit`), which the adapter records as its
+`base_model_name_or_path`; the stage reports it (`adapter_base_model`) and says so in the note when
+it differs, since a base quantised on load is not bit-identical. Both models are scored on the same
+base either way, so the deltas compare like with like.
+
+**What fails the leg** (a raise; a clean failure the engine does not retry): the projection over
+budget; a split whose bytes do not match their pin, or a `dataset:` ref that reached the box
+unresolved; an adapter that cannot be found, or a promoted tag (`<name>@<tag>`: the box has no
+registry); an unknown preset; no `time_budget_s` outside the stub tier. **What is "not evaluated"**
+(`checked=false`, the reason, no scores; the leg succeeds, so a training run is never lost to its
+evaluation): the `[box]` libraries missing, or any error while loading or scoring (a CUDA
+out-of-memory, a task that will not load). A process killed on the box fails the attempt; the leg's
+`retry:` runs it again from the start.
+
+**The stub tier** (`stub: true`): a backend that loads nothing and returns deterministic placeholder
+numbers, so a pipeline's every leg, gate and record run without a GPU. Its output is `stub: true`
+and never `checked`.
+
+**Security.** The `hf` backend reads no endpoint key and no secret; nothing is written to
+`os.environ`. The box's own credential chain reads the splits and writes the results file (as the
+trainer's does). The results file holds settings, versions, scores and losses, never a row of data.
+
+**Risk class:** `external_write` (paid GPU time, and it writes the results file to the checkpoint
+bucket), the class of `train.qlora`. **Contract:** none yet (as `compress/distill`); a stage
+contract in a contract wheel is a public contract and an owner decision.
+
 ## 4. Configuration
 
 | Setting | Where | Scope | Default | What it does |
@@ -211,6 +289,33 @@ all) must be checked before decontaminated numbers are claimed. The header and
 model-construction path above is read from 0.4.13's source, not run. Nothing in
 this pack has run against a live harness.
 
+### The `eval.lm_eval` stage
+
+`EvalStageConfig` (`schemas/eval_stage.py`), set by the flow's `$config.*` wiring:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `base_model` | — | Hugging Face id (or path) of the base |
+| `adapter_uri` / `local_adapter_dir` | `""` | the adapter: the train leg's directory on this box first, else the URI (`s3://…/`, `hf://<repo>`, a Hub id, a path); a promoted tag is refused |
+| `method` | `qlora` | `qlora` loads the base in 4 bit; `lora` in float16 |
+| `preset` | `forgetting` | the task preset (`limits` per task, a fixed `batch_size`) |
+| `seed` | `1234` | lm-eval's four seeds, the same for both models |
+| `batch_size` | `0` (the preset's) | per-model batch size |
+| `val_uri` / `test_uri` | `""` | the held-out splits, as the control plane resolved them (`<location>#sha256=<hash>`) |
+| `max_seq_len` / `split_rows` | `2048` / `0` (all) | the split loss's truncation and rows |
+| `time_budget_s` | required outside the stub tier | the leg's timeout, in seconds; the probe's ceiling |
+| `time_margin` / `probe_items` | `0.1` / `50` | budget kept back; documents the probe scores |
+| `stub` | `false` | the stub tier |
+
+The findings a leg reports (`eval_lm_eval_<key>`): `checked`, `note`, `stub`, the settings (`preset`,
+`tasks`, `seed`, `batch_size`, `num_fewshot`, `method`, `base_model`, `quantization`, `adapter`,
+`adapter_source`, `adapter_base_model`, `chat_template_source`, `lm_eval_version`), per task and
+metric `base_<task>_<metric>`, `candidate_…`, `delta_…` and each one's `_stderr`, `n_<task>` (documents
+per model), `metrics_compared`, `regressions`, `regressed`, `worst_delta`, `worst_delta_metric`,
+`split_loss_method`, `base_/candidate_/delta_{val,test}_loss`, `{val,test}_rows`, `{val,test}_tokens`,
+`probe_documents`, `probe_s`, `probe_model_s_per_request`, `projected_s`, `elapsed_s`, `results_uri` (and `results_upload_error`
+when the upload failed).
+
 ## 7. Testing
 
 `packages/cairn-operator-eval-lm/tests/`, run by `scripts/test_wheels.sh` (a fresh venv, the wheel
@@ -228,6 +333,18 @@ Not covered here, and needing a GPU box serving the candidate: any real harness
 call, the decontamination argument's real name, real per-case cost/latency
 reporting, and whether `local-completions` needs a `tokenizer` for the
 loglikelihood tasks in `knowledge`.
+
+The stage (`tests/test_eval_stage.py`) runs on a faked `inprocess.Backend` and a fake clock: the
+identical calls for both models on one loaded base, MMLU's own limit, the deltas and standard
+errors in each metric's direction, the split loss on the same rendered rows, the probe's limits,
+a projection that equals the length of a run whose cost is linear in batches, the refusal before
+the full run, the results file (local, and uploaded to a fake S3 under the run's key), the adapter
+and split resolution, the failure paths, the stub tier, and an untouched `os.environ`. Through
+`cairn-pack-finetune`, the stage runs in the core's runner and on the core's launch door and bridge.
+**Not proven:** `HfBackend` itself (model loading, `HFLM` over a pre-loaded and a PEFT-wrapped
+model, 4-bit loading under transformers 5.5, the request-method timing, IFEval's generation cost on
+a T4) and the projection's accuracy on real hardware. The first live run must check them, and
+compare one base and one candidate score with a hand run of `lm_eval --model hf`.
 
 From a checkout:
 
@@ -248,3 +365,4 @@ it runs after the wheel is installed (`test_wheels.sh` does both).
 | 2026-10-26 | Review fixes before the first release: the endpoint key goes to the harness call as an explicit header, never `os.environ` (ADR-0143 D3), and a named key the run cannot read is a refusal; the harness runs in a worker thread (ADR-0125); the seam drops arguments the installed `simple_evaluate` does not take (0.4.13 has no decontamination argument); a case's cost is counted once. Read against lm-eval 0.4.13's source; no contract change. | |
 | 2026-10-26 | Second review: `[harness]` bounded to `lm-eval>=0.4.10,<0.5` (the releases read); the seam refuses when the installed `simple_evaluate` does not take `limit` or `num_fewshot`, and refuses when the built model's effective header is not the one passed; other dropped arguments, including the decontamination request, are named in the note; the key is redacted from failure notes. No contract change. | |
 | 2026-10-26 | Third review: `[harness]` capped at `<0.4.14` (the releases whose source was read: 0.4.10–0.4.13). The tokenizer probe during construction authenticates only with the run's own key, or with none (`openai_completions.py:35`, `utils.py:873-874` in 0.4.13); a later release is admitted only after its source is read the same way. | |
+| 2026-10-27 | 0.2.0 (cairn-extensions#42): the `eval.lm_eval` flow-stage kernel (§3a) — base model and base + adapter scored in process on the GPU box with identical settings, held-out split loss by one named method, a time probe that refuses a run projected past the leg's timeout, per-task scores ± standard error, deltas and a results file uploaded beside the run's checkpoints. The `[box]` and `test` extras; the `forgetting` and `forgetting-ifeval` presets and a per-task `limits` table; the result parsing moved to `scoring.py` (shared, unchanged); `eval/lm-eval` refuses a preset that sizes tasks apart (one harness call cannot honour per-task limits). The operator's ref, version, schemas and reports are unchanged. | |

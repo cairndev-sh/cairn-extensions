@@ -1,6 +1,7 @@
 # pipelines/sft-own-box.yaml — `sft` on a box cairn does not start or stop (cairn-extensions#26).
 #
-#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → improved → promote-model ⏸ → promote ⏸
+#   approve-run ⏸ → smoke (ml) → smoke-ok → train (ml) → eval (ml) → improved → promote-model ⏸
+#     → promote ⏸
 #
 # The same pipeline as `sft.yaml` without its three box steps (`acquire`, `release-box` and the
 # `release` finalizer) and without the `compute_connection` input: for an SSH box you start and
@@ -28,7 +29,7 @@ inputs:
   # an intake verdict; the launch door refuses anything else before a record exists.
   train_version: {type: str, role: training, verdict: required, description: "dataset:<name>-train@<v> — the registered training version."}
   val_version: {type: str, role: validation, verdict: required, description: "dataset:<name>-val@<v> — the registered validation version."}
-  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; recorded, never trained on."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; never trained on, its loss measured once by the eval leg."}
   base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
   accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
   method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}
@@ -58,13 +59,16 @@ inputs:
   tracking_project: {type: str, default: "sft"}
   artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local (the machine the ml leg ran on — on an ssh box, out of the control plane's reach), s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
-  stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
+  stub: {type: bool, default: false, description: "Run the hermetic stub trainer and stub evaluation (no GPU): proves the pipeline, trains and measures nothing."}
+  # cairn-extensions#42 — the `eval` leg.
+  eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
 
 governance:
-  # #27 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch door
-  # checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h) × 2 attempts = 25 box-hours,
-  # $16.50 at the example rate of $0.66/h. A box dearer than $1/h needs a larger budget, or a copy
-  # of this pipeline with shorter timeouts.
+  # #27, #42 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch
+  # door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h) × 2 attempts = 31
+  # box-hours, $20.46 at the example rate of $0.66/h. A box dearer than $0.80/h needs a larger
+  # budget, or a copy of this pipeline with shorter timeouts.
   budget: {usd: 25}
   series: sft
   approvers: ml-owners
@@ -149,9 +153,38 @@ steps:
       max_eval_loss: $input.max_eval_loss
       registered_model_name: $input.registered_model_name
 
+  # ── base vs candidate, on the same box as train (cairn-extensions#42) ────────
+  # The `sft-eval` flow: the base model loaded once (4-bit for qlora), scored with lm-evaluation-
+  # harness, the new adapter attached to the same weights, scored again with the same tasks,
+  # documents, few-shot count, batch size and seeds; then both models' loss on the val and test
+  # versions by one method (`eval_lm_eval_split_loss_method` on the record). The adapter is the
+  # train leg's directory on this box, or its published `adapter_uri` when that is gone.
+  # A time probe scores about 50 documents first and refuses the leg (a clean failure, not retried)
+  # when the projection does not fit `time_budget_s`, which must equal `timeout` in seconds. A
+  # harness that is missing or fails on the box is not a failure: the leg reports `checked: false`
+  # with the reason and the card shows it. A killed attempt is retried once and starts again.
+  - id: eval
+    label: Benchmarks and held-out loss, base and candidate
+    flow: sft-eval
+    depends_on: [train]
+    timeout: 3h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      local_adapter_dir: $steps.train.train_qlora_local_adapter_dir
+      adapter_uri: $steps.train.train_qlora_adapter_uri
+      val_uri: $input.val_version
+      test_uri: $input.test_version
+      preset: $input.eval_preset
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 10800
+      stub: $input.stub
+
   # ── the verdict: better than the model it started from, on the same rows ──
   - gate: improved
-    depends_on: [train]
+    depends_on: [train, eval]
     predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
 
   # ── the PERSON gate on the model ──────────────────────────────────────────
@@ -165,6 +198,32 @@ steps:
       - train.train_qlora_steps
       - train.candidate_artifact_id
       - input.test_version
+      # the eval leg (#42): whether it measured, how, and the deltas (candidate − base) with their
+      # standard errors; every figure, with sample sizes, is in its results file (`results_uri`)
+      - eval.eval_lm_eval_checked
+      - eval.eval_lm_eval_note
+      - eval.eval_lm_eval_preset
+      - eval.eval_lm_eval_split_loss_method
+      - eval.eval_lm_eval_base_val_loss
+      - eval.eval_lm_eval_candidate_val_loss
+      - eval.eval_lm_eval_base_test_loss
+      - eval.eval_lm_eval_candidate_test_loss
+      - eval.eval_lm_eval_worst_delta
+      - eval.eval_lm_eval_worst_delta_metric
+      - eval.eval_lm_eval_regressions
+      - eval.eval_lm_eval_delta_arc_easy_acc
+      - eval.eval_lm_eval_delta_arc_easy_acc_stderr
+      - eval.eval_lm_eval_delta_arc_challenge_acc
+      - eval.eval_lm_eval_delta_arc_challenge_acc_stderr
+      - eval.eval_lm_eval_delta_hellaswag_acc
+      - eval.eval_lm_eval_delta_hellaswag_acc_stderr
+      - eval.eval_lm_eval_delta_winogrande_acc
+      - eval.eval_lm_eval_delta_winogrande_acc_stderr
+      - eval.eval_lm_eval_delta_piqa_acc
+      - eval.eval_lm_eval_delta_piqa_acc_stderr
+      - eval.eval_lm_eval_delta_mmlu_acc
+      - eval.eval_lm_eval_delta_mmlu_acc_stderr
+      - eval.eval_lm_eval_results_uri
 
   # ── tag the adapter (an operator-declared gate) ───────────────────────────
   - id: promote
@@ -182,4 +241,8 @@ outputs:
   baseline_eval_loss: train.train_qlora_baseline_eval_loss
   eval_loss: train.train_qlora_eval_loss
   train_loss: train.train_qlora_train_loss
+  evaluated: eval.eval_lm_eval_checked
+  eval_results: eval.eval_lm_eval_results_uri
+  test_loss_base: eval.eval_lm_eval_base_test_loss
+  test_loss: eval.eval_lm_eval_candidate_test_loss
   promoted: promote.artifact_id

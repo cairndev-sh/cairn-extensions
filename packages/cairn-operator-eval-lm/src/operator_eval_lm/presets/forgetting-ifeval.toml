@@ -1,0 +1,22 @@
+# forgetting-ifeval — `forgetting` plus one instruction-following task (cairn-extensions#42).
+#
+# For `finetune/eval-adapter`, whose `eval` leg has six hours. IFEval is the whole task (541
+# prompts) at lm-eval's own generation settings (greedy, up to 1280 new tokens), so its numbers
+# compare with published ones. A base model rarely stops early, so IFEval dominates the cost; the
+# stage's time probe measures it on every run and refuses before the full run when the projection
+# does not fit the leg.
+
+name        = "forgetting-ifeval"
+description = "`forgetting` plus IFEval (all 541 prompts), base vs candidate."
+
+tasks = ["arc_easy", "arc_challenge", "hellaswag", "winogrande", "piqa", "mmlu", "ifeval"]
+
+num_fewshot = 0
+limit       = 500
+batch_size  = 16
+
+decontaminate = false
+
+[limits]
+mmlu   = 10               # per subject: 57 × 10 = 570 questions
+ifeval = 541              # the whole task

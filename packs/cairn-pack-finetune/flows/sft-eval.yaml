@@ -1,0 +1,42 @@
+# flows/sft-eval.yaml — benchmarks and held-out loss, base model vs base model + adapter, as one
+# governed ml leg on the GPU box (cairn-extensions#42). The stage is cairn-operator-eval-lm's
+# `eval.lm_eval` kernel; the profile's ml engine decides where the leg runs (`ml_target`), never
+# this file. `finetune/sft` runs it after `train`; `finetune/eval-adapter` runs it on an adapter you
+# already have.
+#
+# One stage, so a retried leg starts the evaluation again: there is nothing to resume from.
+#
+# `val_uri` and `test_uri` arrive as registered `dataset:` refs, which the control plane resolves
+# to their location pinned by hash; the stage verifies the bytes before it reads a row.
+# `time_budget_s` must be the leg's `timeout:` in seconds (the stage cannot read the leg's timeout;
+# the pipelines' tests hold the two equal): the time probe refuses a run projected past it.
+#
+# `$config.<key>` with no value is omitted, so the stage's default applies.
+
+name: sft-eval
+kind: ml
+description: >
+  Score the base model and the base model plus the adapter with identical lm-evaluation-harness
+  settings (a task preset; same 4-bit loading, seed and documents), and their loss on the held-out
+  validation and test splits by one method; refuse up front when a time probe projects the run past
+  the leg's timeout.
+
+stages:
+  - stage: eval.lm_eval
+    config:
+      base_model: $config.base_model
+      adapter_uri: $config.adapter_uri
+      local_adapter_dir: $config.local_adapter_dir
+      method: $config.method
+      preset: $config.preset
+      seed: $config.seed
+      batch_size: $config.batch_size
+      val_uri: $config.val_uri
+      test_uri: $config.test_uri
+      max_seq_len: $config.max_seq_len
+      split_rows: $config.split_rows
+      time_budget_s: $config.time_budget_s
+      probe_items: $config.probe_items
+      stub: $config.stub
+    resources:
+      gpu: 1

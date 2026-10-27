@@ -3,7 +3,7 @@
 # qualification run is cairn-extensions#9. The pack README's "Run it" walks through every step.
 #
 # The control plane (runs the engine, the data leg and the gates, and starts and stops the box;
-# no torch). cairn-pack-finetune 0.1.2 needs cairndev 0.3.1 or later (compute/acquire,
+# no torch). cairn-pack-finetune 0.2.0 needs cairndev 0.3.1 or later (compute/acquire,
 # compute/release and the GPU estimate):
 #
 #     pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # [ssh]: asyncssh
@@ -17,16 +17,16 @@
 #         --set instance_id=<i-…> --set region=<aws-region> --set hourly_usd=<rate>
 #     cairn doctor --strict && cairn pipeline explain finetune/sft
 #
-# The GPU box (runs `cairn-dataflow-run` and the trainer only; no engine, no worker):
+# The GPU box (runs `cairn-dataflow-run`, the trainer and the evaluation only; no engine, no worker):
 #
-#     pip install 'cairn-operator-training[gpu]'        # + ',track-mlflow' with report_to: [mlflow]
+#     pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]'   # + ',track-mlflow' with report_to: [mlflow]
 #     # and the same cairn-contracts-training* versions as the control plane (the engine checks
 #     # the flow's stages against the control plane's registry; the box must run the same ones)
 #
 # To run unreleased changes, install from a checkout of cairn-extensions instead
 # (`pip install ./packages/… ./packs/…`).
 #
-#   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after `train`
+#   * The box: `sft` starts it after `approve-run` (`compute/acquire`) and stops it after `eval`
 #     and again, as a finalizer, on every outcome (`compute/release`). The connection must name an
 #     EC2 instance (`instance_id`, `region`; an Elastic IP keeps `host` stable across a stop), and
 #     the control plane needs boto3 (a dependency of cairn-pack-finetune) and AWS credentials that
@@ -60,7 +60,7 @@
 #     Set them on the GPU box, or set them on the control plane and uncomment `remote_env`
 #     below: the SSH engine forwards each named variable that is set, and refuses a name
 #     containing KEY, SECRET, TOKEN or PASSWORD.
-#   * The `sft` smoke and train legs retry once after their process is killed, and the trainer
+#   * The `sft` smoke, train and eval legs retry once after their process is killed, and the trainer
 #     resumes from the run's checkpoints in CAIRN_CHECKPOINT_BUCKET; without that bucket a retry
 #     starts again from step 0.
 #   * MLFLOW_TRACKING_URI (and MLFLOW_TRACKING_USERNAME / _PASSWORD, MLFLOW_EXPERIMENT_NAME), set
@@ -91,7 +91,7 @@ visibility = "public"
 
 [profile.backends]
 dataflow_engine  = "builtin"  # dataset-prep/prepare's data leg, on the control plane's box
-ml_engine        = "builtin"  # the sft-train flow, dispatched to ml_target
+ml_engine        = "builtin"  # the sft-train and sft-eval flows, dispatched to ml_target
 ml_target        = "gpu"      # the compute.ssh connection named `gpu`
 remote_exec_mode = "venv"     # the box's virtualenv: no published image carries this trainer yet
 artifact_store   = "s3"       # the versions and registered files cross machines through S3

@@ -7,12 +7,17 @@
 # Why not an in-process benchmark that loads base weights + a LoRA adapter on a GPU
 # (requires_gpu = true): this one is HTTP against a server someone else sized — no GPU
 # of its own, and the artefact it measures is the one that will ship.
+#
+# The in-process shape exists too, as a flow-stage KERNEL rather than an operator
+# (cairn-extensions#42): `eval.lm_eval` in the `cairn.flow_stages` entry-point group
+# (pyproject.toml), run as an ml leg on the GPU box by a domain pack's flow. Flow stages are not
+# listed in this manifest; the operator below is unchanged.
 
 [pack]
 name        = "cairn-operator-eval-lm"
-version     = "0.1.0"
+version     = "0.2.0"
 type        = "operator"
-description = "eval/lm-eval: lm-evaluation-harness against a served candidate, presets as pack data."
+description = "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box; presets as pack data."
 kind        = "operator"
 publisher   = "cairn"
 trust_level = "official"
