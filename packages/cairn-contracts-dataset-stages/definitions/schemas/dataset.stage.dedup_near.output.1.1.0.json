@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract://dataset.stage.dedup_near.output/1.1.0",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows kept."
+    },
+    "dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows dropped."
+    },
+    "dropped_near": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows dropped as near duplicates (read by intake)."
+    },
+    "dropped_fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "dropped / the rows this stage read, rounded to 4 places; 0.0 for an empty input (cairn-extensions#39)."
+    },
+    "checked": {
+      "type": "boolean",
+      "description": "False when the pass was skipped (read by intake)."
+    },
+    "method": {
+      "type": "string",
+      "description": "The method applied, or skipped."
+    },
+    "note": {
+      "type": "string",
+      "description": "Why the pass was skipped."
+    },
+    "threshold": {
+      "type": "number",
+      "description": "The threshold applied."
+    }
+  },
+  "required": [
+    "rows",
+    "dropped",
+    "dropped_near",
+    "dropped_fraction",
+    "checked",
+    "method"
+  ]
+}

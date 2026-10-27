@@ -8,7 +8,7 @@
 
 [pack]
 name        = "cairn-operator-dataset-checks"
-version     = "0.1.0"
+version     = "0.1.1"
 type        = "operator"
 description = "Deterministic readiness checks for fine-tuning datasets (format, dedup, …)."
 kind        = "operator"

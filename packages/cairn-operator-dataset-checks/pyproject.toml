@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-dataset-checks"
-version = "0.1.0"
+version = "0.1.1"
 description = "Dataset readiness for cairn: deterministic checks (format, dedup, decontamination, PII, profile, provenance, split) as governed operations, and the admission and cleaning kernels as dataflow stages."
 readme = "README.md"
 license = "Apache-2.0"
@@ -25,7 +25,7 @@ dependencies = [
     # `[compat]`) and the two contract wheels it implements, pinned exactly.
     "cairndev>=0.2.1,<0.4",
     "cairn-contracts-dataset==1.2.0",
-    "cairn-contracts-dataset-stages==1.4.0",
+    "cairn-contracts-dataset-stages==1.5.0",
 ]
 
 [project.urls]

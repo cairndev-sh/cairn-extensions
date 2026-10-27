@@ -213,7 +213,17 @@ def dedup_exact(workdir: Path, config: dict, inputs: list[str]) -> dict:
     shutil.move(str(out), _current(workdir))  # shutil.move: workdir may span filesystems (the EXDEV lesson)
     return {"rows": result.kept, "dropped": result.dropped,
             "dropped_exact": result.dropped_exact, "dropped_near": result.dropped_near,
+            "dropped_fraction": _dropped_fraction(result.dropped, result.total),
             "backend": "python"}
+
+
+def _dropped_fraction(dropped: int, rows_in: int) -> float:
+    """``dropped / rows_in``, rounded to 4 places; ``0.0`` for an empty input.
+
+    The share of this stage's own input that it dropped (cairn-extensions#39). A pipeline
+    expression cannot divide (it is plain JMESPath), so a gate that pauses for a person when a
+    dedup pass drops "too much" compares this stat with its limit."""
+    return round(dropped / rows_in, 4) if rows_in else 0.0
 
 
 def _dedup_exact_duckdb(workdir: Path, *, normalize: bool) -> dict:
@@ -269,7 +279,8 @@ def _dedup_exact_duckdb(workdir: Path, *, normalize: bool) -> dict:
         con.close()
     shutil.move(str(out), src)  # shutil.move: workdir may span filesystems (the EXDEV lesson)
     return {"rows": kept, "dropped": total - kept, "dropped_exact": total - kept,
-            "dropped_near": 0, "backend": "duckdb"}
+            "dropped_near": 0, "dropped_fraction": _dropped_fraction(total - kept, total),
+            "backend": "duckdb"}
 
 
 def pii_redact(workdir: Path, config: dict, inputs: list[str]) -> dict:
@@ -959,8 +970,8 @@ def dedup_near(workdir: Path, config: dict, inputs: list[str]) -> dict:
     src = _current(workdir)
     if not minhash_available():
         rows = sum(1 for line in src.open(encoding="utf-8") if line.strip())
-        return {"rows": rows, "dropped_near": 0, "dropped": 0, "checked": False,
-                "method": "skipped",
+        return {"rows": rows, "dropped_near": 0, "dropped": 0, "dropped_fraction": 0.0,
+                "checked": False, "method": "skipped",
                 "note": "near-duplicate dedup needs the [minhash] extra "
                         "(pip install 'cairn-operator-dataset-checks[minhash]') — only exact "
                         "duplicates were removed"}
@@ -977,7 +988,8 @@ def dedup_near(workdir: Path, config: dict, inputs: list[str]) -> dict:
     ))
     shutil.move(str(out), src)  # shutil.move: workdir may span filesystems (the EXDEV lesson)
     return {"rows": result.kept, "dropped": result.dropped,
-            "dropped_near": result.dropped_near, "checked": True,
+            "dropped_near": result.dropped_near,
+            "dropped_fraction": _dropped_fraction(result.dropped, result.total), "checked": True,
             "method": result.method_used,
             "threshold": float(config.get("threshold", 0.8))}
 
@@ -1311,3 +1323,7 @@ split.implements = ("contract://dataset.stage.split/1.0.0",)
 profile_tokens.implements = ("contract://dataset.stage.profile_tokens/1.1.0",)
 fields_derive.implements = ("contract://dataset.stage.fields_derive/1.0.0",)
 profile_fields.implements = ("contract://dataset.stage.profile_fields/1.0.0",)
+# cairn-extensions#39 — both dedup passes report `dropped_fraction`, the share of their input they
+# dropped, which the prepare pipeline's `data-review` gate compares with its limit (1.1.0).
+dedup_exact.implements = ("contract://dataset.stage.dedup_exact/1.1.0",)
+dedup_near.implements = ("contract://dataset.stage.dedup_near/1.1.0",)

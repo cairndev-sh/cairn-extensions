@@ -8,7 +8,7 @@
 # loads the same directory as a dev pack.
 [project]
 name = "cairn-pack-dataset-prep"
-version = "0.1.0"
+version = "0.2.0"
 description = "cairn domain pack: prepare a dataset once into registered train, val and test versions."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,14 +18,15 @@ authors = [{name = "cairn maintainers"}]
 dependencies = [
     "cairndev>=0.2.1,<0.4",
     # The kernels the flow names (ingest.normalize 1.2.0, fields.derive, profile.fields,
-    # profile.tokens 1.1.0, split 1.0.0 with export, dataset.manifest).
-    "cairn-operator-dataset-checks>=0.1,<0.2",
+    # profile.tokens 1.1.0, split 1.0.0 with export, dataset.manifest), and dedup.exact /
+    # dedup.near 1.1.0, whose `dropped_fraction` the data-review gate reads (0.1.1).
+    "cairn-operator-dataset-checks>=0.1.1,<0.2",
 ]
 
 [project.optional-dependencies]
 # Near-duplicate dedup (dedup.near is an honest skip without it) and the tokenizer that counts
 # lengths with the base model's own vocabulary (whitespace words without it).
-all = ["cairn-operator-dataset-checks[minhash,tokenizers]>=0.1,<0.2"]
+all = ["cairn-operator-dataset-checks[minhash,tokenizers]>=0.1.1,<0.2"]
 # test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
 test = ["moto[s3]>=5"]
 

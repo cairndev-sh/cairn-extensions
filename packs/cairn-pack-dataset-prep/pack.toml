@@ -13,7 +13,7 @@
 
 [pack]
 name        = "dataset-prep"
-version     = "0.1.0"
+version     = "0.2.0"
 description = "Prepare a dataset once: pin the source, audit it, split it by group and register train, val and test versions with their roles."
 tags = [
     "domain:modelops",
