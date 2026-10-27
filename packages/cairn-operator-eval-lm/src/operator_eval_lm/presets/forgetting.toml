@@ -1,0 +1,31 @@
+# forgetting — did fine-tuning cost the base model its general ability? (cairn-extensions#42)
+#
+# The preset the `eval.lm_eval` flow stage runs on the GPU box for the base model and for the base
+# model plus the candidate adapter, with identical settings, after `finetune/sft`'s `train` leg.
+# Five multiple-choice tasks scored by log-likelihood, 500 documents each, and MMLU sized on its
+# own: lm-eval applies a limit per SUBJECT (57 of them), so `limits.mmlu = 10` is 570 questions,
+# not 10. At an accuracy near 0.7, 500 documents give a standard error of about 0.02 per model.
+#
+# No instruction-following task here: IFEval generates up to 1280 tokens per prompt and does not
+# fit `sft`'s three-hour `eval` leg on a T4. `forgetting-ifeval` adds it, for
+# `finetune/eval-adapter`'s longer leg.
+#
+# Cost, measured once (cairn-extensions#9, a T4, Qwen3-4B 4-bit): about 0.65 s per document for
+# these five tasks and about 3.4 s per MMLU question, per model. The stage's time probe measures
+# again on every run and refuses before the full run when the projection does not fit the leg.
+
+name        = "forgetting"
+description = "ARC-Easy, ARC-Challenge, HellaSwag, WinoGrande, PIQA (500 each) and MMLU (10 per subject), base vs candidate."
+
+tasks = ["arc_easy", "arc_challenge", "hellaswag", "winogrande", "piqa", "mmlu"]
+
+num_fewshot = 0
+limit       = 500         # documents per task
+batch_size  = 16          # fixed, not "auto": the time probe's batch arithmetic needs a known size
+
+# Base and candidate are scored on the same documents, and lm-eval 0.4.10-0.4.13 take no
+# decontamination argument, so nothing is requested.
+decontaminate = false
+
+[limits]
+mmlu = 10                 # per subject: 57 × 10 = 570 questions

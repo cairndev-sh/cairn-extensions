@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-eval-lm"
-version = "0.1.0"
-description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, task presets as pack data."
+version = "0.2.0"
+description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, and the eval.lm_eval flow stage that scores a base model and its adapter on the GPU box; task presets as pack data."
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{name = "cairn maintainers"}]
 requires-python = ">=3.12"
 # Light by design: the Operation base, the context and the shared scorecard / budget contract
 # (cairn.core.eval.scorecard) come from the engine. lm-eval itself is the optional [harness]
-# extra below, imported lazily in operator_eval_lm.harness, so the pack registers and its tests
-# pass without it. The base install is the engine range this pack is proven on (ADR-0128 D3:
+# extra below (or [box] on the GPU box), imported lazily in operator_eval_lm.harness and
+# operator_eval_lm.inprocess, so the pack registers and its tests pass without it. The base install is the engine range this pack is proven on (ADR-0128 D3:
 # bounded, the same range as `[compat]`); the operator implements no shared contract yet, so
 # there is no contract wheel to pin.
 dependencies = [
@@ -34,9 +34,24 @@ Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
 # take an explicit request header, so the endpoint key never comes from the
 # process environment; the seam also checks that at run time and refuses otherwise.
 harness = ["lm-eval>=0.4.10,<0.4.14"]
+# box — the `eval.lm_eval` flow stage on the GPU box (cairn-extensions#42): lm-eval's `hf` backend
+# (transformers, torch, accelerate, peft) and the IFEval task's checkers, in the same bounded range
+# as [harness]; boto3 for s3:// splits, an s3:// adapter and the results upload. Install it NEXT TO
+# `cairn-operator-training[gpu]`, which pins torch, transformers, peft, accelerate and bitsandbytes
+# exactly: lm-eval's own requirements are floors, so the trainer's pins win and both stages run on
+# one environment (4-bit loading needs that pack's bitsandbytes). Never on the control plane.
+box = ["lm-eval[hf,ifeval]>=0.4.10,<0.4.14", "boto3>=1.34"]
+# test — what the pack's own tests import beyond pytest; CI installs it (scripts/test_wheels.sh).
+# moto: a fake S3 for the stage's splits, adapter and results upload.
+test = ["moto[s3]>=5"]
 
 [project.entry-points."cairn.operators"]
 "eval/lm-eval" = "operator_eval_lm.operators.lm_eval:LmEvalOp"
+
+# cairn-extensions#42 — the on-box kernel, in the engine-neutral flow-stage group (ADR-0082 D7):
+# the base model and base + adapter scored in process, as an ml leg a domain pack's flow names.
+[project.entry-points."cairn.flow_stages"]
+"eval.lm_eval" = "operator_eval_lm.flow_stages:eval_lm_eval"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/operator_eval_lm"]

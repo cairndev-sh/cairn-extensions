@@ -1,7 +1,7 @@
 # pipelines/sft.yaml — fine-tune on prepared dataset versions (cairn-extensions#7).
 #
-#   approve-run ⏸ → acquire → smoke (ml) → smoke-ok → train (ml) → release-box → improved
-#     → promote-model ⏸ → promote ⏸                       finally: release (on every outcome)
+#   approve-run ⏸ → acquire → smoke (ml) → smoke-ok → train (ml) → eval (ml) → release-box
+#     → improved → promote-model ⏸ → promote ⏸            finally: release (on every outcome)
 #
 # Prepared data only: `train_version`, `val_version` and `test_version` are registered `dataset:`
 # refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. The launch
@@ -22,16 +22,21 @@
 #     tokenizer, trainer, packaging) proved cheaply before the full run.
 #   * `train` — the full run. The trainer evaluates on `val_version` at the end twice: the candidate
 #     (`eval_loss`) and, with the adapter switched off, the base model (`baseline_eval_loss`).
-#   * `release-box` — `compute/release` stops the box as soon as the last GPU leg is done, so it
-#     does not bill while a person decides on promotion (ADR-0151 D11).
+#   * `eval` — the `sft-eval` flow on the same box (cairn-extensions#42): lm-evaluation-harness
+#     (`eval_preset`) for the base model and for the base model plus the new adapter, with
+#     identical settings, and both models' loss on `val_version` and `test_version` by one named
+#     method. A time probe refuses the leg up front when the run would not fit its timeout.
+#   * `release-box` — `compute/release` stops the box as soon as the last GPU leg (`eval`) is done,
+#     so it does not bill while a person decides on promotion (ADR-0151 D11).
 #   * `improved` — the candidate's validation loss must be below the base model's.
-#   * `promote-model` — a person decides, with the losses on the card.
+#   * `promote-model` — a person decides, with the losses and the evaluation's deltas on the card
+#     (shown, not gated: a predicate on the deltas comes once real runs have sized the noise).
 #   * `promote` — the `<tag>` points at the packaged adapter; `artifact/promote` asks for its own
 #     approval as well.
 #   * `release` — the same `compute/release` as a `finalizer:`: it runs once the pipeline is done,
 #     failed or cancelled, whatever the chain above reached. It is idempotent (a stopped box is a
-#     success). On a cancel, the engine job of a running `smoke` / `train` leg on the box is
-#     cancelled before this release stops the box (ADR-0151 D9).
+#     success). On a cancel, the engine job of a running `smoke` / `train` / `eval` leg on the box
+#     is cancelled before this release stops the box (ADR-0151 D9).
 #
 # The box: `compute_connection` names the `compute.ssh` connection acquire starts and release
 # stops, and it MUST be the connection the environment's `ml_target` selects (`gpu` in the
@@ -42,10 +47,10 @@
 # A box cairn does not start and stop (your own SSH box, any provider) or one machine:
 # `finetune/sft-own-box` is this pipeline without `acquire`, `release-box` and `release`.
 #
-# Not yet: the one-time comparison on `test_version` and a generation-quality evaluation need the
-# evaluation operators, which are not public yet (cairn-extensions#9 tracks the run that will use
-# them). Until then the verdict is validation loss against the base model's, and `test_version`
-# is recorded on the run, never trained on and never evaluated.
+# `test_version` is never trained on; the `eval` leg measures both models' loss on it once. Not
+# yet: a generation-quality evaluation (generated answers scored, base vs candidate:
+# cairn-extensions#41). The verdict is still validation loss against the base model's; the
+# benchmark deltas are on the `promote-model` card for the person who decides.
 name: sft
 kind: pipeline
 visibility: public
@@ -61,7 +66,7 @@ inputs:
   # an intake verdict; the launch door refuses anything else before a record exists.
   train_version: {type: str, role: training, verdict: required, description: "dataset:<name>-train@<v> — the registered training version."}
   val_version: {type: str, role: validation, verdict: required, description: "dataset:<name>-val@<v> — the registered validation version."}
-  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; recorded, never trained on."}
+  test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version; never trained on, its loss measured once by the eval leg."}
   base_model: {type: str, default: "Qwen/Qwen3-4B-Base", description: "Hugging Face model id to adapt."}
   accept_license: {type: bool, default: false, description: "Required true when base_model is a gated catalog entry."}
   method: {type: str, default: "qlora", description: "qlora (4-bit) or lora."}
@@ -91,16 +96,19 @@ inputs:
   tracking_project: {type: str, default: "sft"}
   artifact_target: {type: str, default: "local", description: "Where the adapter is kept: local (the machine the ml leg ran on — on an ssh box, out of the control plane's reach), s3 (CAIRN_CHECKPOINT_BUCKET) or hf."}
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
-  stub: {type: bool, default: false, description: "Run the hermetic stub trainer (no GPU): proves the pipeline, trains nothing."}
+  stub: {type: bool, default: false, description: "Run the hermetic stub trainer and stub evaluation (no GPU): proves the pipeline, trains and measures nothing."}
+  # cairn-extensions#42 — the `eval` leg.
+  eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
   # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
   # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.
-  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after train; must be the environment's ml_target (finetune-ssh: gpu)."}
+  compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after eval; must be the environment's ml_target (finetune-ssh: gpu)."}
 
 governance:
-  # #27 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch door
-  # checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h) × 2 attempts = 25 box-hours,
-  # $16.50 at the example rate of $0.66/h. A box dearer than $1/h needs a larger budget, or a copy
-  # of this pipeline with shorter timeouts.
+  # #27, #42 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch
+  # door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h) × 2 attempts = 31
+  # box-hours, $20.46 at the example rate of $0.66/h. A box dearer than $0.80/h needs a larger
+  # budget, or a copy of this pipeline with shorter timeouts.
   budget: {usd: 25}
   series: sft
   approvers: ml-owners
@@ -123,9 +131,10 @@ steps:
   # ── start the box, after the approval (ADR-0151 D11) ──────────────────────
   # `paid_compute`: under a profile that gates paid compute it pauses for its own approval too.
   # `max_hours` is the lease `cairn compute sweep --apply` enforces if the control plane dies. It
-  # covers the retried worst case, 2 attempts × (30m + 12h) = 25h, plus a one-hour margin, so a
-  # sweep never stops the box under a retried `train`. The trade-off: a box orphaned by a dead
-  # control plane can bill until the lease expires and a sweep stops it (26h, $17.16 at $0.66/h).
+  # covers the retried worst case, 2 attempts × (30m + 12h + 3h) = 31h, plus a one-hour margin, so
+  # a sweep never stops the box under a retried `train` or `eval`. The trade-off: a box orphaned by
+  # a dead control plane can bill until the lease expires and a sweep stops it (32h, $21.12 at
+  # $0.66/h).
   # A box acquire cannot start (no `instance_id` on the connection) fails this leg, and the
   # finalizer still runs.
   - id: acquire
@@ -134,7 +143,7 @@ steps:
     depends_on: [approve-run]
     with:
       connection: $input.compute_connection
-      max_hours: 26
+      max_hours: 32
 
   # ── smoke: the whole path on a subsample, a few steps ─────────────────────
   - id: smoke
@@ -202,18 +211,47 @@ steps:
       max_eval_loss: $input.max_eval_loss
       registered_model_name: $input.registered_model_name
 
+  # ── base vs candidate, on the same box, before it stops (cairn-extensions#42) ──
+  # The `sft-eval` flow: the base model loaded once (4-bit for qlora), scored with lm-evaluation-
+  # harness, the new adapter attached to the same weights, scored again with the same tasks,
+  # documents, few-shot count, batch size and seeds; then both models' loss on the val and test
+  # versions by one method (`eval_lm_eval_split_loss_method` on the record). The adapter is the
+  # train leg's directory on this box, or its published `adapter_uri` when that is gone.
+  # A time probe scores about 50 documents first and refuses the leg (a clean failure, not retried)
+  # when the projection does not fit `time_budget_s`, which must equal `timeout` in seconds. A
+  # harness that is missing or fails on the box is not a failure: the leg reports `checked: false`
+  # with the reason and the card shows it. A killed attempt is retried once and starts again.
+  - id: eval
+    label: Benchmarks and held-out loss, base and candidate
+    flow: sft-eval
+    depends_on: [train]
+    timeout: 3h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      local_adapter_dir: $steps.train.train_qlora_local_adapter_dir
+      adapter_uri: $steps.train.train_qlora_adapter_uri
+      val_uri: $input.val_version
+      test_uri: $input.test_version
+      preset: $input.eval_preset
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 10800
+      stub: $input.stub
+
   # ── stop the box: the last GPU leg is done (ADR-0151 D11) ─────────────────
   # Before any person decides on promotion, so the box does not bill while it waits.
   - id: release-box
     label: Stop the GPU box
     task: compute/release
-    depends_on: [train]
+    depends_on: [train, eval]
     with:
       connection: $input.compute_connection
 
   # ── the verdict: better than the model it started from, on the same rows ──
   - gate: improved
-    depends_on: [train, release-box]
+    depends_on: [train, eval, release-box]
     predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
 
   # ── the PERSON gate on the model ──────────────────────────────────────────
@@ -227,6 +265,32 @@ steps:
       - train.train_qlora_steps
       - train.candidate_artifact_id
       - input.test_version
+      # the eval leg (#42): whether it measured, how, and the deltas (candidate − base) with their
+      # standard errors; every figure, with sample sizes, is in its results file (`results_uri`)
+      - eval.eval_lm_eval_checked
+      - eval.eval_lm_eval_note
+      - eval.eval_lm_eval_preset
+      - eval.eval_lm_eval_split_loss_method
+      - eval.eval_lm_eval_base_val_loss
+      - eval.eval_lm_eval_candidate_val_loss
+      - eval.eval_lm_eval_base_test_loss
+      - eval.eval_lm_eval_candidate_test_loss
+      - eval.eval_lm_eval_worst_delta
+      - eval.eval_lm_eval_worst_delta_metric
+      - eval.eval_lm_eval_regressions
+      - eval.eval_lm_eval_delta_arc_easy_acc
+      - eval.eval_lm_eval_delta_arc_easy_acc_stderr
+      - eval.eval_lm_eval_delta_arc_challenge_acc
+      - eval.eval_lm_eval_delta_arc_challenge_acc_stderr
+      - eval.eval_lm_eval_delta_hellaswag_acc
+      - eval.eval_lm_eval_delta_hellaswag_acc_stderr
+      - eval.eval_lm_eval_delta_winogrande_acc
+      - eval.eval_lm_eval_delta_winogrande_acc_stderr
+      - eval.eval_lm_eval_delta_piqa_acc
+      - eval.eval_lm_eval_delta_piqa_acc_stderr
+      - eval.eval_lm_eval_delta_mmlu_acc
+      - eval.eval_lm_eval_delta_mmlu_acc_stderr
+      - eval.eval_lm_eval_results_uri
 
   # ── tag the adapter (an operator-declared gate) ───────────────────────────
   - id: promote
@@ -254,4 +318,8 @@ outputs:
   baseline_eval_loss: train.train_qlora_baseline_eval_loss
   eval_loss: train.train_qlora_eval_loss
   train_loss: train.train_qlora_train_loss
+  evaluated: eval.eval_lm_eval_checked
+  eval_results: eval.eval_lm_eval_results_uri
+  test_loss_base: eval.eval_lm_eval_base_test_loss
+  test_loss: eval.eval_lm_eval_candidate_test_loss
   promoted: promote.artifact_id

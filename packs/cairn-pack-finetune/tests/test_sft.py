@@ -130,6 +130,51 @@ async def test_every_trainer_figure_the_promote_model_card_shows_is_in_the_findi
     assert {k: findings.get(k) for k in shown if findings.get(k) is None} == {}
 
 
+# ── #42: the eval leg, base vs candidate ─────────────────────────────────────────────────────
+
+def _run_eval(workdir: Path, config: dict):
+    from cairn.core.dataflow import Budget, DataflowSpec
+    from cairn.core.dataflow.defs import resolve_flow_ref
+    from cairn.core.dataflow.runner import run_dataflow
+
+    stages = resolve_flow_ref("finetune/sft-eval", config, kind="ml")
+    return run_dataflow(DataflowSpec(stages=stages, budget=Budget()), workdir)
+
+
+def test_the_eval_leg_follows_train_and_reads_its_adapter_and_the_held_out_versions():
+    ev = _with("eval")
+    assert ev["local_adapter_dir"] == "$steps.train.train_qlora_local_adapter_dir"
+    assert ev["adapter_uri"] == "$steps.train.train_qlora_adapter_uri"
+    assert (ev["val_uri"], ev["test_uri"]) == ("$input.val_version", "$input.test_version")
+    assert ev["base_model"] == _with("train")["base_model"] and ev["method"] == _with("train")["method"]
+    assert ev["preset"] == "$input.eval_preset" and _pipeline()["inputs"]["eval_preset"]["default"] == "forgetting"
+
+
+async def test_the_eval_flow_on_the_stub_tier_reports_both_models_and_every_figure_the_card_shows(tmp_path, versions):
+    """The pack's `sft-eval` flow on the core runner with the stub tier and the train leg's stub
+    adapter: the pinned val and test versions are verified and read, placeholder scores come back
+    for both models (never `checked`), and every `eval.*` figure `promote-model` shows is a finding."""
+    from cairn.core.engine.bundle import eval_gate_predicate
+
+    train = await asyncio.to_thread(_run, tmp_path / "train", await _leg_config(versions, "train", _INPUTS))
+    tf = _findings(train)["findings"]
+    cfg = await _leg_config(versions, "eval", _INPUTS)
+    cfg.update(local_adapter_dir=tf["train_qlora_local_adapter_dir"], adapter_uri=tf["train_qlora_adapter_uri"])
+    cfg.pop("retry")
+    result = await asyncio.to_thread(_run_eval, tmp_path / "eval", cfg)
+    findings = _findings(result)["findings"]
+
+    assert findings["eval_lm_eval_stub"] is True and findings["eval_lm_eval_checked"] is False
+    assert findings["eval_lm_eval_adapter_source"] == "local_adapter_dir"
+    assert findings["eval_lm_eval_val_rows"] == 6 and findings["eval_lm_eval_test_rows"] == 6
+    assert [d.kind for d in result.output_artifacts] == ["report"]          # the results file
+    gate = next(s for s in _pipeline()["steps"] if s.get("gate") == "promote-model")
+    shown = [f.split(".", 1)[1] for f in gate["show"] if f.startswith("eval.")]
+    assert len(shown) == 24 and [k for k in shown if findings.get(k) is None] == []
+    # the stub's adapter cannot pass the verdict either way: `improved` reads train only
+    assert not eval_gate_predicate(_gate("improved"), bundle_input=_INPUTS, steps={"train": tf, "eval": findings})
+
+
 def test_improved_passes_only_when_the_candidate_beats_the_base_model():
     from cairn.core.engine.bundle import eval_gate_predicate
 

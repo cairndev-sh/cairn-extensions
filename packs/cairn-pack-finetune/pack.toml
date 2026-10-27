@@ -1,8 +1,9 @@
 # finetune — fine-tune a model on prepared dataset versions (cairn-extensions#7).
 #
 # A domain pack is DATA plus glue, never operators (ADR-0127 D2): this manifest, the `sft`
-# pipeline, the `sft-train` flow it runs (every stage from cairn-operator-training), a profile
-# for an ssh GPU box and a preset. Assets are found by convention (`pipelines/`, `flows/`,
+# pipeline, the `sft-train` flow it runs (every stage from cairn-operator-training), the
+# `sft-eval` flow (cairn-operator-eval-lm's `eval.lm_eval`, cairn-extensions#42) that `sft` and
+# `eval-adapter` run, a profile for an ssh GPU box and presets. Assets are found by convention (`pipelines/`, `flows/`,
 # `profiles/`, `presets/`), so there is no `[assets]` block.
 #
 # It accepts prepared data only — registered train / val / test versions, as
@@ -11,8 +12,8 @@
 
 [pack]
 name        = "finetune"
-version     = "0.1.1"
-description = "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person."
+version     = "0.2.0"
+description = "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person, with benchmarks and held-out loss for base and candidate; or evaluate an adapter you already have."
 tags = [
     "domain:modelops",
     "domain:finetune",

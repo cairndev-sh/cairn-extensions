@@ -3,13 +3,14 @@
 # Discovered through the `cairn.packs` entry point declared here: `pip install
 # cairn-pack-finetune` is all the engine needs. The wheel carries this directory under the
 # import name `cairn_pack_finetune`: the manifest, the one-line shim the entry point
-# targets, and the declarative assets. No operator; every stage the flow names comes from
-# cairn-operator-training. The control plane needs no torch: the GPU box installs
-# `cairn-operator-training[gpu]`. In a checkout, `CAIRN_PACK_PATH=packs/cairn-pack-finetune`
+# targets, and the declarative assets. No operator; the stages the flows name come from
+# cairn-operator-training (`sft-train`) and cairn-operator-eval-lm (`sft-eval`). The control plane
+# needs no torch: the GPU box installs `cairn-operator-training[gpu]` and
+# `cairn-operator-eval-lm[box]`. In a checkout, `CAIRN_PACK_PATH=packs/cairn-pack-finetune`
 # loads the same directory as a dev pack.
 [project]
 name = "cairn-pack-finetune"
-version = "0.1.1"
+version = "0.2.0"
 description = "cairn domain pack: fine-tune a model with LoRA or QLoRA on prepared train, val and test versions."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,6 +22,9 @@ dependencies = [
     # The kernels the flow names (sample.fidelity, train.qlora 1.2.0, eval.checkpoints,
     # package.adapter); the base install carries no training stack.
     "cairn-operator-training>=0.1,<0.2",
+    # The kernel the `sft-eval` flow names (eval.lm_eval, cairn-extensions#42): the control plane
+    # checks a flow's stages against its registry at launch; the box needs the `[box]` extra.
+    "cairn-operator-eval-lm>=0.2,<0.3",
     # compute/acquire and compute/release (cairndev's remote pack) start and stop the `sft` box
     # through boto3 on the control plane; cairndev declares it only in an extra (#26).
     "boto3>=1.34",

@@ -1,0 +1,23 @@
+# presets/ifc-bim-qwen3-4b-eval-adapter-own-box.yaml — the `ifc-bim-qwen3-4b` preset for
+# `finetune/eval-adapter-own-box` (cairn-extensions#42): a preset file names one pipeline, so this is
+# a copy of `ifc-bim-qwen3-4b-eval-adapter.yaml` with the other pipeline ref;
+# tests/test_eval_adapter.py keeps the two equal.
+#
+#     cairn remote launch finetune/eval-adapter-own-box --preset ifc-bim-qwen3-4b --watch
+#
+pipeline: finetune/eval-adapter-own-box
+presets:
+  - name: ifc-bim-qwen3-4b
+    description: >
+      cairndev/qwen3-4b-ifc-bim-qlora against its 4-bit Qwen3-4B base: forgetting-ifeval
+      (ARC-E, ARC-C, HellaSwag, WinoGrande, PIQA at 500, MMLU at 10 per subject, IFEval) and the
+      loss on ifc-bim-alpaca's val and test versions.
+    inputs:
+      adapter_uri: "hf://cairndev/qwen3-4b-ifc-bim-qlora"
+      base_model: unsloth/qwen3-4b-base-unsloth-bnb-4bit
+      method: qlora
+      val_version: "dataset:ifc-bim-alpaca-val@latest"
+      test_version: "dataset:ifc-bim-alpaca-test@latest"
+      eval_preset: forgetting-ifeval
+      eval_seed: 1234
+      max_seq_len: 2048

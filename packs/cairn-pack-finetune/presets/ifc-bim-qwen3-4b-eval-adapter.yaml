@@ -1,0 +1,29 @@
+# presets/ifc-bim-qwen3-4b-eval-adapter.yaml — evaluate the published IFC/BIM adapter
+# (cairndev/qwen3-4b-ifc-bim-qlora, trained by `finetune/sft --preset ifc-bim-qwen3-4b` in
+# cairn-extensions#9) with `finetune/eval-adapter` (cairn-extensions#42).
+#
+#     cairn remote launch finetune/eval-adapter --preset ifc-bim-qwen3-4b --watch
+#
+# `ifc-bim-qwen3-4b-eval-adapter-own-box.yaml` is the same preset for `finetune/eval-adapter-own-box`.
+#
+# The base is the 4-bit checkpoint the trainer actually loaded: Unsloth substitutes
+# `unsloth/qwen3-4b-base-unsloth-bnb-4bit` for `Qwen/Qwen3-4B-Base` under 4-bit loading, and the
+# adapter records it. Scoring on it scores the weights the adapter was trained on (the hand-run
+# check in cairn-extensions#9 used the same). The val and test versions are the ones it was
+# validated on and never saw.
+pipeline: finetune/eval-adapter
+presets:
+  - name: ifc-bim-qwen3-4b
+    description: >
+      cairndev/qwen3-4b-ifc-bim-qlora against its 4-bit Qwen3-4B base: forgetting-ifeval
+      (ARC-E, ARC-C, HellaSwag, WinoGrande, PIQA at 500, MMLU at 10 per subject, IFEval) and the
+      loss on ifc-bim-alpaca's val and test versions.
+    inputs:
+      adapter_uri: "hf://cairndev/qwen3-4b-ifc-bim-qlora"
+      base_model: unsloth/qwen3-4b-base-unsloth-bnb-4bit
+      method: qlora
+      val_version: "dataset:ifc-bim-alpaca-val@latest"
+      test_version: "dataset:ifc-bim-alpaca-test@latest"
+      eval_preset: forgetting-ifeval
+      eval_seed: 1234
+      max_seq_len: 2048

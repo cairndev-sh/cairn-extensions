@@ -36,6 +36,17 @@ class TaskPreset(BaseModel):
     decontaminate: bool = Field(
         True, description="Request lm-eval's 13-gram overlap decontamination (ADR-0102 D5)."
     )
+    limits: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-task document limits that override `limit` (cairn-extensions#42). lm-eval "
+                    "applies a limit per LEAF task, so a group's limit (mmlu: 57 subjects) is per "
+                    "subject. Read by the on-box `eval.lm_eval` stage, which runs each task in its "
+                    "own harness call; the served-candidate operator runs one call with `limit`.",
+    )
+
+    def limit_for(self, task: str) -> int:
+        """The document limit for ``task``: its entry in ``limits``, else ``limit`` (0 = all)."""
+        return int(self.limits.get(task, self.limit))
 
 
 def available() -> list[str]:

@@ -1,26 +1,22 @@
 """finetune/sft starts and stops its GPU box, and the approver sees the estimate
-(cairn-extensions#26, #27; cairndev-sh/cairn ADR-0151 D4, D9, D11).
+(cairn-extensions#26, #27, #42; cairndev-sh/cairn ADR-0151 D4, D9, D11).
 
 The plan: `compute/acquire` after `approve-run` and before `smoke`; `compute/release` right after
-`train`, the last GPU leg; a `finalizer:` `compute/release` as the backstop. Then the pipeline on
+`eval`, the last GPU leg (#42); a `finalizer:` `compute/release` as the backstop. Then the pipeline on
 the core's own launch door and in-process bridge, with this pack's `sft` definition and the
 `finetune-ssh` profile: the door prices the ml legs on the `gpu` connection and the estimate is in
 `approve-run`'s evidence; the box is started after the approval and stopped before a person
 decides on promotion; a cancel mid-train cancels the job on the box before the box stops; a
 failed leg still stops the box.
 
-Hermetic: EC2 is a fake behind `CAIRN_EC2_CLIENT_FACTORY` (the core's documented dev seam), the
-`gpu` connection lives in a throwaway SQLite connection store, its SSH port is a local socket, and
-the ml legs run on a fake engine. No AWS call and no SSH connection is made. `sft-own-box`, the same
+Hermetic (the `env` fixture in `conftest.py`): EC2 is a fake behind `CAIRN_EC2_CLIENT_FACTORY`
+(the core's documented dev seam), the `gpu` connection lives in a throwaway SQLite connection
+store, its SSH port is a local socket, and the ml legs run on a fake engine. No AWS call and no SSH connection is made. `sft-own-box`, the same
 pipeline without the box steps, is pinned to `sft` here and runs the same stub path with no EC2 call.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import socket
-import sys
 import tomllib
 import types
 from pathlib import Path
@@ -31,6 +27,9 @@ import yaml
 PACK = Path(__file__).resolve().parents[1]
 PROFILE = PACK / "profiles" / "finetune-ssh.toml"
 _FLOW = "flow:finetune/sft-train"
+_EVAL = "flow:finetune/sft-eval"
+#: The ml legs, each priced on the box: the two trainer legs and the evaluation (#42).
+_ML = (_FLOW, _EVAL)
 
 
 #: The steps `sft` has and `sft-own-box` does not: the box cairn starts and stops (#26).
@@ -54,15 +53,16 @@ def test_the_box_is_started_after_approval_and_stopped_after_the_last_gpu_leg():
     plan = _plan()
     steps = {s.id: s for s in plan.steps}
     order = [s.id for s in plan.steps if not s.finalizer]
-    assert order == ["approve-run", "acquire", "smoke", "smoke-ok", "train", "release-box",
+    assert order == ["approve-run", "acquire", "smoke", "smoke-ok", "train", "eval", "release-box",
                      "improved", "promote-model", "promote"]
     assert steps["acquire"].ref == "task:compute/acquire" and steps["acquire"].depends_on == ["approve-run"]
     assert steps["smoke"].depends_on == ["acquire"]
-    gpu_legs = [s.id for s in plan.steps if s.ref == _FLOW]
-    assert gpu_legs == ["smoke", "train"]
+    gpu_legs = [s.id for s in plan.steps if s.ref in _ML]
+    assert gpu_legs == ["smoke", "train", "eval"]
+    assert steps["eval"].ref == _EVAL and steps["eval"].depends_on == ["train"]
     # the release follows the last GPU leg directly, before the person gate on the model
-    assert steps["release-box"].ref == "task:compute/release" and steps["release-box"].depends_on == ["train"]
-    assert "release-box" in steps["improved"].depends_on
+    assert steps["release-box"].ref == "task:compute/release" and steps["release-box"].depends_on == ["train", "eval"]
+    assert {"eval", "release-box"} <= set(steps["improved"].depends_on)
     assert order.index("release-box") < order.index("promote-model")
     for s in (steps["acquire"], steps["release-box"]):
         assert s.inputs["connection"] == "$input.compute_connection"
@@ -88,12 +88,12 @@ def test_both_releases_are_the_operator_the_core_cancels_jobs_before():
 
 def test_the_lease_covers_the_retried_worst_case_plus_a_margin():
     """A sweep must never stop the box under a retried leg: the lease is every attempt of every
-    ml leg, 2 × (30m + 12h) = 25h, plus a margin of at most two hours (an orphaned box bills
+    ml leg, 2 × (30m + 12h + 3h) = 31h, plus a margin of at most two hours (an orphaned box bills
     until the lease expires)."""
     plan = _plan()
-    worst_h = sum(s.timeout_s * s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref == _FLOW) / 3600
+    worst_h = sum(s.timeout_s * s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref in _ML) / 3600
     max_hours = next(s for s in plan.steps if s.id == "acquire").inputs["max_hours"]
-    assert worst_h == 25.0
+    assert worst_h == 31.0
     assert worst_h < max_hours <= worst_h + 2, (worst_h, max_hours)
 
 
@@ -105,11 +105,20 @@ def test_compute_connection_defaults_to_the_profiles_ml_target():
 
 
 def test_the_budget_covers_the_documented_worst_case():
-    """#27: (30m + 12h) × 2 attempts at the example $0.66/h fits `governance.budget.usd`."""
+    """#27, #42: (30m + 12h + 3h) × 2 attempts at the example $0.66/h fits `governance.budget.usd`."""
     plan = _plan()
-    attempts = {s.id: s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref == _FLOW}
-    hours = sum(s.timeout_s / 3600 * attempts[s.id] for s in plan.steps if s.ref == _FLOW)
-    assert hours == 25.0 and round(0.66 * hours, 2) == 16.5 <= _pipeline()["governance"]["budget"]["usd"]
+    attempts = {s.id: s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref in _ML}
+    hours = sum(s.timeout_s / 3600 * attempts[s.id] for s in plan.steps if s.ref in _ML)
+    assert hours == 31.0 and round(0.66 * hours, 2) == 20.46 <= _pipeline()["governance"]["budget"]["usd"]
+
+
+def test_the_eval_leg_is_priced_retried_and_its_time_budget_is_its_timeout():
+    """#42: the evaluation is an ml leg like the trainer's (a timeout, two attempts), and the stage's
+    `time_budget_s` (the time probe's ceiling; a stage cannot read its leg's timeout) equals it."""
+    for name in ("sft", "sft-own-box"):
+        ev = next(s for s in _plan(name).steps if s.id == "eval")
+        assert ev.timeout_s == 3 * 3600 and ev.inputs["retry"] == {"max_attempts": 2}, name
+        assert ev.inputs["time_budget_s"] == ev.timeout_s, name
 
 
 # ── sft-own-box: the same pipeline on a box cairn does not start or stop ──────
@@ -146,7 +155,7 @@ def test_sft_own_box_plans_the_same_legs_and_gates_and_no_compute_step():
     assert [(s.id, s.ref, s.timeout_s) for s in own.steps] == [
         (s.id, s.ref, s.timeout_s) for s in sft.steps if s.id not in _BOX_STEPS]
     deps = {s.id: s.depends_on for s in own.steps}
-    assert deps["smoke"] == ["approve-run"] and deps["improved"] == ["train"]
+    assert deps["smoke"] == ["approve-run"] and deps["improved"] == ["train", "eval"]
 
 
 def test_the_presets_are_the_same_for_both_pipelines():
@@ -160,30 +169,6 @@ def test_the_presets_are_the_same_for_both_pipelines():
 
 
 # ── the launch door and the in-process bridge ─────────────────────────────────
-
-class FakeEC2:
-    """The EC2 client the lifecycle functions call; writes to the shared timeline."""
-
-    def __init__(self, timeline: list[str]) -> None:
-        self.state, self.timeline, self.tags = "stopped", timeline, {}
-
-    def describe_instances(self, **kw):
-        return {"Reservations": [{"Instances": [{"InstanceId": "i-0sft", "State": {"Name": self.state}}]}]}
-
-    def start_instances(self, **kw):
-        self.timeline.append("ec2:start")
-        self.state = "running"
-        return {"StartingInstances": [{"CurrentState": {"Name": "pending"}}]}
-
-    def stop_instances(self, **kw):
-        self.timeline.append("ec2:stop")
-        self.state = "stopped"
-        return {"StoppingInstances": [{"CurrentState": {"Name": "stopping"}}]}
-
-    def create_tags(self, **kw):
-        self.timeline.append("ec2:tags")
-        self.tags.update({t["Key"]: t["Value"] for t in kw.get("Tags") or []})
-
 
 class FakeBoxEngine:
     """The ml engine on the box: a job per submission, which runs the leg's flow with the stub
@@ -206,7 +191,10 @@ class FakeBoxEngine:
         from cairn.core.dataflow.engine import EngineJobHandle, EngineJobStatus
         from cairn.core.dataflow.runner import run_dataflow
 
-        step = "smoke" if any((st.config or {}).get("fidelity_rows") for st in spec.stages) else "train"
+        if any(st.stage == "eval.lm_eval" for st in spec.stages):
+            step = "eval"
+        else:
+            step = "smoke" if any((st.config or {}).get("fidelity_rows") for st in spec.stages) else "train"
         job = f"job-{step}"
         self.timeline.append(f"submit:{step}")
         status, result = EngineJobStatus(state="running"), None
@@ -238,69 +226,6 @@ _INPUTS = {"train_version": "dataset:demo-train@1", "val_version": "dataset:demo
            "test_version": "dataset:demo-test@1", "base_model": "tiny/model", "stub": True}
 
 
-@pytest.fixture
-async def env(tmp_path, monkeypatch):
-    """The `finetune-ssh` profile; the `gpu` connection (an EC2 instance at $0.66/h, its SSH
-    port a local socket) in a throwaway store; registered versions with admitted verdicts; the
-    fake EC2 behind the core's seam."""
-    import cairn.core.storage.artifacts as artifacts
-    from cairn.core.connections import Connection, SqliteConnectionStore
-    from cairn.core.dataflow.contract import ArtifactDescriptor
-    from cairn.core.pack import registry
-    from cairn.core.pack.loader import load_all_packs
-    from cairn.core.storage.artifacts import SqliteArtifactStore
-
-    for name in ("CAIRN_ML_ENGINE", "CAIRN_ML_TARGET", "CAIRN_DATAFLOW_ENGINE", "CAIRN_DATAFLOW_TARGET",
-                 "CAIRN_ARTIFACT_STORE", "CAIRN_REMOTE_EXEC_MODE", "CAIRN_RUNTIME", "CAIRN_STORAGE"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("CAIRN_PROFILE", str(PROFILE))
-    monkeypatch.setenv("CAIRN_PACK_PATH", str(PACK))
-    monkeypatch.setenv("CAIRN_CONNECTIONS_DB", str(tmp_path / "connections.db"))
-
-    ssh = socket.socket()
-    ssh.bind(("127.0.0.1", 0))
-    ssh.listen(8)   # the kernel completes the handshake: acquire's readiness probe sees an open port
-    store = SqliteConnectionStore(str(tmp_path / "connections.db"))
-    await store.create(Connection(name="gpu", kind="compute.ssh", config={
-        "host": "127.0.0.1", "port": str(ssh.getsockname()[1]), "user": "u",
-        "instance_id": "i-0sft", "region": "eu-central-1", "hourly_usd": "0.66"}))
-    close = getattr(store, "close", None)
-    if callable(close):
-        close()
-
-    timeline: list[str] = []
-    ec2 = FakeEC2(timeline)
-    seam = types.ModuleType("_sft_box_ec2_seam")
-    seam.client = lambda region="": ec2
-    monkeypatch.setitem(sys.modules, seam.__name__, seam)
-    monkeypatch.setenv("CAIRN_EC2_CLIENT_FACTORY", f"{seam.__name__}:client")
-
-    versions = SqliteArtifactStore(str(tmp_path / "registry.db"))
-    for name, role, n in (("train", "training", 100), ("val", "validation", 6), ("test", "test", 6)):
-        path = tmp_path / f"{name}.jsonl"
-        path.write_text("".join(json.dumps({"instruction": "Answer.", "input": f"{name} q{i}",
-                                            "output": f"{name} a{i}"}) + "\n" for i in range(n)))
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        await versions.register(ArtifactDescriptor(uri=f"file://{path}", kind="dataset", content_hash=digest),
-                                producer_run_id="prepare")
-        await versions.register_dataset_version(f"demo-{name}", digest, actor="prepare", role=role)
-    for name in ("demo-train", "demo-val"):
-        await versions.set_dataset_version_verdict(name, 1, verdict="admitted", reasons=[], report={})
-    monkeypatch.setattr(artifacts, "build_artifact_store", lambda *a, **k: versions)
-
-    import cairn.core.dispatch.leg_executor as leg_executor
-    monkeypatch.setattr(leg_executor, "_POLL_INTERVAL_S", 0.05)
-
-    registry.clear()
-    load_all_packs()
-    try:
-        yield types.SimpleNamespace(ec2=ec2, timeline=timeline, box=tmp_path / "box")
-    finally:
-        registry.clear()
-        await versions.close()
-        ssh.close()
-
-
 def _sft(name: str = "sft"):
     from cairn.core.engine.pipeline import parse_pipeline_def
 
@@ -323,24 +248,25 @@ async def test_the_launch_door_prices_the_gpu_legs_and_approve_run_shows_the_est
     await launch_pipeline_def(_sft(), inputs=_INPUTS, bridge=bridge)
     admission = bridge.kw["admission"]
     est = admission["cost_estimate"]
-    assert est["estimate_usd"] == pytest.approx(16.5)
+    assert est["estimate_usd"] == pytest.approx(20.46)
     legs = {e["step"]: e for e in est["legs"]}
-    assert set(legs) == {"smoke", "train"}
-    assert legs["smoke"]["runs"] == legs["train"]["runs"] == 2
+    assert set(legs) == {"smoke", "train", "eval"}
+    assert legs["smoke"]["runs"] == legs["train"]["runs"] == legs["eval"]["runs"] == 2
     assert legs["train"]["connection"] == "gpu" and legs["train"]["hourly_usd"] == 0.66
     assert env.timeline == [], "nothing starts at the launch door"
 
     rec = types.SimpleNamespace(admission=admission, plan=bridge.plan)
     shown = estimate_evidence(rec, "approve-run")
-    assert shown["estimate_usd"] == pytest.approx(16.5)
+    assert shown["estimate_usd"] == pytest.approx(20.46)
     assert "smoke: $0.66/h × 0.5h on gpu × 2 (2 attempts)" in shown["estimate_basis"]
     assert "train: $0.66/h × 12h on gpu × 2 (2 attempts)" in shown["estimate_basis"]
+    assert "eval: $0.66/h × 3h on gpu × 2 (2 attempts) = $3.96" in shown["estimate_basis"]
     # only the gate before the first priced leg carries it
     assert estimate_evidence(rec, "smoke-ok") == {} and estimate_evidence(rec, "promote-model") == {}
 
 
 async def test_a_box_dearer_than_the_budget_allows_is_refused_before_any_record(env):
-    """$1.50/h × 25 box-hours = $37.50 > $25: refused at the door, nothing started."""
+    """$1.50/h × 31 box-hours = $46.50 > $25: refused at the door, nothing started."""
     from cairn.core.admission_door import AdmissionRefusedError
     from cairn.core.connections import SqliteConnectionStore, default_connection_store
     from cairn.core.dispatch.pipeline_launch import launch_pipeline_def
@@ -352,7 +278,7 @@ async def test_a_box_dearer_than_the_budget_allows_is_refused_before_any_record(
     bridge = _Capture()
     with pytest.raises(AdmissionRefusedError) as refused:
         await launch_pipeline_def(_sft(), inputs=_INPUTS, bridge=bridge)
-    assert "estimated at $37.50" in str(refused.value)
+    assert "estimated at $46.50" in str(refused.value)
     assert "the budget has $25.00 of $25.00 left in series 'sft'" in str(refused.value)
     assert not hasattr(bridge, "plan") and env.timeline == []
 
@@ -412,7 +338,7 @@ async def _launch_and_approve(b):
 
 async def test_the_stub_run_starts_the_box_after_approval_and_stops_it_after_train(env, monkeypatch):
     """`stub: true` end to end on the bridge: the box starts only after `approve-run`, whose card
-    carries the estimate; it stops right after `train`, before `improved` (which stops a stub
+    carries the estimate; it stops right after `eval`, before `improved` (which stops a stub
     adapter) is decided; the finalizer release finds it stopped and is a success."""
     engine = FakeBoxEngine(env.box, env.timeline, monkeypatch)
     b, audits = await _bridge(engine, monkeypatch)
@@ -424,13 +350,15 @@ async def test_the_stub_run_starts_the_box_after_approval_and_stops_it_after_tra
         await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
         assert env.timeline == [], "no box before the approval"
         (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
-        assert card["evidence"]["estimate_usd"] == pytest.approx(16.5)
+        assert card["evidence"]["estimate_usd"] == pytest.approx(20.46)
         assert "train: $0.66/h × 12h on gpu × 2 (2 attempts)" in card["evidence"]["estimate_basis"]
 
         await b.advance_step(pid, "approve-run", approver="ml-owner")
         rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
 
-        assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "ec2:stop"]
+        assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "submit:eval",
+                                "ec2:stop"]
+        assert rec.step_state["eval"].status == "done"
         assert env.ec2.tags["cairn:managed"] and env.ec2.tags["cairn:release-after"]
         assert rec.step_state["release-box"].status == "done"
         events = [(s, e) for s, e, _ in audits]
@@ -477,6 +405,22 @@ async def test_a_failed_train_leg_still_stops_the_box(env, monkeypatch):
         b.stop()
 
 
+async def test_a_failed_eval_leg_still_stops_the_box(env, monkeypatch):
+    """#42: the evaluation fails on the box (a time-probe refusal, or a crash): the pipeline fails
+    before a person is asked, and the finalizer stops the box."""
+    engine = FakeBoxEngine(env.box, env.timeline, monkeypatch, fail="eval")
+    b, _ = await _bridge(engine, monkeypatch)
+    try:
+        pid = await _launch_and_approve(b)
+        rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
+
+        assert rec.status == "failed" and rec.step_state["release"].status == "done"
+        assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "submit:eval", "ec2:stop"]
+        assert getattr(rec.step_state.get("promote-model"), "status", "pending") == "pending"
+    finally:
+        b.stop()
+
+
 async def test_sft_own_box_runs_on_the_stub_with_no_ec2_call(env, monkeypatch):
     """The same stub run on `sft-own-box`: the legs run on the profile's `gpu` box (priced, so
     `approve-run` still shows the estimate), and cairn never calls EC2."""
@@ -489,11 +433,11 @@ async def test_sft_own_box_runs_on_the_stub_with_no_ec2_call(env, monkeypatch):
         pid = rec.pipeline_id
         await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
         (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
-        assert card["evidence"]["estimate_usd"] == pytest.approx(16.5)
+        assert card["evidence"]["estimate_usd"] == pytest.approx(20.46)
         await b.advance_step(pid, "approve-run", approver="ml-owner")
         rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
 
-        assert env.timeline == ["submit:smoke", "submit:train"], "no EC2 call"
+        assert env.timeline == ["submit:smoke", "submit:train", "submit:eval"], "no EC2 call"
         assert rec.status == "failed" and rec.step_state["improved"].status != "done"
         assert set(rec.step_state) == {s.id for s in _plan("sft-own-box").steps}
     finally:
