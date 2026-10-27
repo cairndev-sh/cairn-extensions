@@ -1,7 +1,8 @@
 # pipelines/sft.yaml — fine-tune on prepared dataset versions (cairn-extensions#7).
 #
-#   approve-run ⏸ → acquire → smoke (ml) → smoke-ok → train (ml) → eval (ml) → release-box
-#     → improved → promote-model ⏸ → promote ⏸            finally: release (on every outcome)
+#   approve-run ⏸ → acquire → smoke (ml) → smoke-ok → train (ml) → eval (ml) → generate (ml)
+#     → ifc (ml, when ifc_schema is set) → release-box → improved → promote-model ⏸ → promote ⏸
+#                                                         finally: release (on every outcome)
 #
 # Prepared data only: `train_version`, `val_version` and `test_version` are registered `dataset:`
 # refs, as `dataset-prep/prepare` registers them. Nothing here re-audits or re-splits. The launch
@@ -28,17 +29,26 @@
 #     (`eval_preset`) for the base model and for the base model plus the new adapter, with
 #     identical settings, and both models' loss on `val_version` and `test_version` by one named
 #     method. A time probe refuses the leg up front when the run would not fit its timeout.
-#   * `release-box` — `compute/release` stops the box as soon as the last GPU leg (`eval`) is done,
+#   * `generate` — the `sft-generate` flow on the same box (cairn-extensions#41): the base model and
+#     the candidate answer `generate_sample_n` prompts drawn from `test_version` (same 4-bit loading,
+#     chat template, seed and greedy decoding); both are scored against the references (exact match,
+#     contains), and the answers are kept as a samples file.
+#   * `ifc` — only when the launch names `ifc_schema`: the `ifc-validate` flow checks every answer in
+#     the samples file as IFC (cairn-operator-ifc-eval): parse validity and schema errors for the
+#     reference, the base model and the candidate. Which validator legs follow `generate` is the
+#     pipeline's choice, made by its inputs; another domain's validator is another such leg.
+#   * `release-box` — `compute/release` stops the box as soon as the last box leg is done,
 #     so it does not bill while a person decides on promotion (ADR-0151 D11).
 #   * `improved` — the candidate's validation loss must be below the base model's.
-#   * `promote-model` — a person decides, with the losses and the evaluation's deltas on the card
-#     (shown, not gated: a predicate on the deltas comes once real runs have sized the noise).
+#   * `promote-model` — a person decides, with the losses, the evaluation's deltas and the
+#     generated answers' scores on the card (shown, not gated: a predicate on the deltas comes once
+#     real runs have sized the noise).
 #   * `promote` — the `<tag>` points at the packaged adapter; `artifact/promote` asks for its own
 #     approval as well.
 #   * `release` — the same `compute/release` as a `finalizer:`: it runs once the pipeline is done,
 #     failed or cancelled, whatever the chain above reached. It is idempotent (a stopped box is a
-#     success). On a cancel, the engine job of a running `smoke` / `train` / `eval` leg on the box
-#     is cancelled before this release stops the box (ADR-0151 D9).
+#     success). On a cancel, the engine job of a running `smoke` / `train` / `eval` / `generate` /
+#     `ifc` leg on the box is cancelled before this release stops the box (ADR-0151 D9).
 #
 # The box: `compute_connection` names the `compute.ssh` connection acquire starts and release
 # stops, and it MUST be the connection the environment's `ml_target` selects (`gpu` in the
@@ -49,10 +59,10 @@
 # A box cairn does not start and stop (your own SSH box, any provider) or one machine:
 # `finetune/sft-own-box` is this pipeline without `acquire`, `release-box` and `release`.
 #
-# `test_version` is never trained on; the `eval` leg measures both models' loss on it once. Not
-# yet: a generation-quality evaluation (generated answers scored, base vs candidate:
-# cairn-extensions#41). The verdict is still validation loss against the base model's; the
-# benchmark deltas are on the `promote-model` card for the person who decides.
+# `test_version` is never trained on; the `eval` leg measures both models' loss on it once and the
+# `generate` leg draws its prompts from it. The verdict is still validation loss against the base
+# model's; the benchmark deltas and the generated answers' scores are on the `promote-model` card
+# for the person who decides.
 name: sft
 kind: pipeline
 visibility: public
@@ -101,16 +111,21 @@ inputs:
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer and stub evaluation (no GPU): proves the pipeline, trains and measures nothing."}
   # cairn-extensions#42 — the `eval` leg.
   eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
-  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
+  eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models; also draws the generate leg's prompts and seeds its decoding."}
+  # cairn-extensions#41 — the `generate` leg, and the validator legs that read its answers.
+  generate_sample_n: {type: int, default: 50, description: "Prompts from test_version the generate leg answers with the base model and with the candidate (all of them when it has fewer)."}
+  generate_max_new_tokens: {type: int, default: 512, description: "The longest answer the generate leg asks for, in tokens."}
+  ifc_schema: {type: str, default: "", description: "An IFC schema (IFC2X3, IFC4, IFC4X3_ADD2): the ifc leg checks every answer as IFC for the reference, the base model and the candidate. Empty = no IFC check (the leg is routed off)."}
   # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
   # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.
   compute_connection: {type: str, default: "gpu", description: "The compute.ssh connection to start after approve-run and stop after eval; must be the environment's ml_target (finetune-ssh: gpu)."}
 
 governance:
-  # #27, #42 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the launch
-  # door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h) × 2 attempts = 31
-  # box-hours, $20.46 at the example rate of $0.66/h. A box dearer than $0.80/h needs a larger
-  # budget, or a copy of this pipeline with shorter timeouts.
+  # #27, #42, #41 — sized to the priced legs' worst case: on a connection with `hourly_usd`, the
+  # launch door checks hourly_usd × timeout × attempts for each ml leg, (30m + 12h + 3h + 1h + 15m)
+  # × 2 attempts = 33.5 box-hours, $22.11 at the example rate of $0.66/h (the ifc leg is priced
+  # whether or not the launch routes it off). A box dearer than $0.74/h needs a larger budget, or a
+  # copy of this pipeline with shorter timeouts.
   budget: {usd: 25}
   series: sft
   approvers: ml-owners
@@ -133,10 +148,10 @@ steps:
   # ── start the box, after the approval (ADR-0151 D11) ──────────────────────
   # `paid_compute`: under a profile that gates paid compute it pauses for its own approval too.
   # `max_hours` is the lease `cairn compute sweep --apply` enforces if the control plane dies. It
-  # covers the retried worst case, 2 attempts × (30m + 12h + 3h) = 31h, plus a one-hour margin, so
-  # a sweep never stops the box under a retried `train` or `eval`. The trade-off: a box orphaned by
-  # a dead control plane can bill until the lease expires and a sweep stops it (32h, $21.12 at
-  # $0.66/h).
+  # covers the retried worst case, 2 attempts × (30m + 12h + 3h + 1h + 15m) = 33.5h, plus a margin,
+  # so a sweep never stops the box under a retried `train`, `eval`, `generate` or `ifc`. The
+  # trade-off: a box orphaned by a dead control plane can bill until the lease expires and a sweep
+  # stops it (35h, $23.10 at $0.66/h).
   # A box acquire cannot start (no `instance_id` on the connection) fails this leg, and the
   # finalizer still runs.
   - id: acquire
@@ -145,7 +160,7 @@ steps:
     depends_on: [approve-run]
     with:
       connection: $input.compute_connection
-      max_hours: 32
+      max_hours: 35
 
   # ── smoke: the whole path on a subsample, a few steps ─────────────────────
   - id: smoke
@@ -242,18 +257,67 @@ steps:
       time_budget_s: 10800
       stub: $input.stub
 
-  # ── stop the box: the last GPU leg is done (ADR-0151 D11) ─────────────────
-  # Before any person decides on promotion, so the box does not bill while it waits.
+  # ── the models' own answers, on the same box (cairn-extensions#41) ────────
+  # The `sft-generate` flow: `generate_sample_n` prompts drawn from the test version with
+  # `eval_seed`, answered by the base model (loaded once, 4-bit for qlora) and then by the adapter
+  # on the same weights, with the chat template the adapter was trained with and greedy decoding;
+  # both scored against the references (exact match, contains); the answers kept as a samples file
+  # (`eval_generate_samples_uri`). The first batch projects the run and refuses the leg (a clean
+  # failure, not retried) when it would not fit `time_budget_s`, which must equal `timeout` in
+  # seconds. A missing or failing backend reports `checked: false` and writes no samples. A killed
+  # attempt is retried once and starts again.
+  - id: generate
+    label: Generated answers, base and candidate
+    flow: sft-generate
+    depends_on: [eval]
+    timeout: 1h
+    with:
+      retry: {max_attempts: 2}
+      base_model: $input.base_model
+      method: $input.method
+      local_adapter_dir: $steps.train.train_qlora_local_adapter_dir
+      adapter_uri: $steps.train.train_qlora_adapter_uri
+      test_uri: $input.test_version
+      sample_n: $input.generate_sample_n
+      max_new_tokens: $input.generate_max_new_tokens
+      seed: $input.eval_seed
+      max_seq_len: $input.max_seq_len
+      time_budget_s: 3600
+      stub: $input.stub
+
+  # ── a validator on those answers, when the launch asks for one ────────────
+  # Routed off (skipped, the pipeline continues) unless `ifc_schema` names a schema. The
+  # `ifc-validate` flow reads the samples file on this box (or from the checkpoint bucket), verified
+  # against the hash the generate leg reported, and reports parse validity and schema errors for the
+  # reference, the base model and the candidate, and the candidate's rates against the base model's.
+  # No GPU; it runs on the box because the samples are there. It never gates.
+  - id: ifc
+    label: IFC validity of the answers, base and candidate
+    flow: ifc-validate
+    depends_on: [generate]
+    when: input.ifc_schema != ''
+    timeout: 15m
+    with:
+      retry: {max_attempts: 2}
+      samples_path: $steps.generate.eval_generate_samples_path
+      samples_uri: $steps.generate.eval_generate_samples_uri
+      samples_sha256: $steps.generate.eval_generate_samples_sha256
+      schema_version: $input.ifc_schema
+      stub: $input.stub
+
+  # ── stop the box: the last box leg is done (ADR-0151 D11) ─────────────────
+  # Before any person decides on promotion, so the box does not bill while it waits. A routed-off
+  # `ifc` counts as done.
   - id: release-box
     label: Stop the GPU box
     task: compute/release
-    depends_on: [train, eval]
+    depends_on: [train, eval, generate, ifc]
     with:
       connection: $input.compute_connection
 
   # ── the verdict: better than the model it started from, on the same rows ──
   - gate: improved
-    depends_on: [train, eval, release-box]
+    depends_on: [train, eval, generate, ifc, release-box]
     predicate: steps.train.findings.train_qlora_eval_loss < steps.train.findings.train_qlora_baseline_eval_loss
 
   # ── the PERSON gate on the model ──────────────────────────────────────────
@@ -293,6 +357,30 @@ steps:
       - eval.eval_lm_eval_delta_mmlu_acc
       - eval.eval_lm_eval_delta_mmlu_acc_stderr
       - eval.eval_lm_eval_results_uri
+      # the generate leg (#41): the models' own answers to held-out prompts, scored against the
+      # references; every answer is in its samples file (`samples_uri`)
+      - generate.eval_generate_checked
+      - generate.eval_generate_note
+      - generate.eval_generate_samples
+      - generate.eval_generate_base_exact_match
+      - generate.eval_generate_candidate_exact_match
+      - generate.eval_generate_delta_exact_match
+      - generate.eval_generate_base_contains
+      - generate.eval_generate_candidate_contains
+      - generate.eval_generate_delta_contains
+      - generate.eval_generate_samples_uri
+      # the ifc leg (#12), when it ran: parse validity and schema errors of the answers
+      - ifc.eval_ifc_validate_checked
+      - ifc.eval_ifc_validate_note
+      - ifc.eval_ifc_validate_schema_version
+      - ifc.eval_ifc_validate_reference_parse_valid_rate
+      - ifc.eval_ifc_validate_base_parse_valid_rate
+      - ifc.eval_ifc_validate_candidate_parse_valid_rate
+      - ifc.eval_ifc_validate_delta_parse_valid_rate
+      - ifc.eval_ifc_validate_base_schema_error_rate
+      - ifc.eval_ifc_validate_candidate_schema_error_rate
+      - ifc.eval_ifc_validate_delta_valid_rate
+      - ifc.eval_ifc_validate_results_uri
 
   # ── tag the adapter (an operator-declared gate) ───────────────────────────
   - id: promote
@@ -324,4 +412,5 @@ outputs:
   eval_results: eval.eval_lm_eval_results_uri
   test_loss_base: eval.eval_lm_eval_base_test_loss
   test_loss: eval.eval_lm_eval_candidate_test_loss
+  generation_samples: generate.eval_generate_samples_uri
   promoted: promote.artifact_id

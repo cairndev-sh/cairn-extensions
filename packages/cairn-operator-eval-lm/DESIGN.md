@@ -201,6 +201,50 @@ trainer's does). The results file holds settings, versions, scores and losses, n
 bucket), the class of `train.qlora`. **Contract:** none yet (as `compress/distill`); a stage
 contract in a contract wheel is a public contract and an owner decision.
 
+## 3b. The on-box stage `eval.generate` (cairn-extensions#41)
+
+Loss says how likely the reference answers are; it does not say whether the model's own answers are
+usable. `eval.generate` (`generate_stage.py`, in the same `cairn.flow_stages` group) asks both
+models the same held-out questions and keeps what they wrote.
+
+**Reuse, not a copy.** It runs on the same backend seam as `eval.lm_eval` (`inprocess.Backend`):
+the same `load` (4-bit for `qlora`), `chat_template` (the adapter's, else the base tokenizer's, else
+ChatML), `check_adapter` before any load, and `attach` (the adapter on the same loaded weights).
+The seam gains `generate` (greedy, left-padded batches, the prompt truncated from the left, stop at
+EOS or the template's end-of-turn token) and `render(..., add_generation_prompt=True)`. The split is
+read and verified by `box_io` (`fetch_dataset`, pinned by hash) and split into prompt and reference
+by `flow_stages._messages`, the trainer's row mapping.
+
+**One run:** draw `sample_n` usable rows of the test split with `seed` (all of them when there are
+fewer); render each prompt; the base model answers in batches; after the first batch the stage
+projects the run (the remaining base batches and every candidate batch at `CANDIDATE_FACTOR`) and
+raises `TimeBudgetExceeded` past `time_budget_s` less `time_margin`, headline last; the candidate
+answers the same prompts; each answer is scored with the baseline scorers, `exact_match` (equal
+after collapsing whitespace) and `contains` (the reference appears in the answer); each model's
+mean, the delta and a binomial standard error of the delta (treating the two models as
+independent, which over-states it: they answer the same prompts).
+
+**The samples file** (`generation_samples.jsonl`, one JSON line per prompt: `index`, `row`,
+`prompt` turns, `reference`, `base`, `candidate`, `scores`) is the stage's `report` product,
+uploaded to `…/<run>/eval/generation_samples.jsonl` beside the checkpoints when
+`CAIRN_CHECKPOINT_BUCKET` is set. The stage reports both its path on the box (`samples_path`) and
+where it was kept (`samples_uri`), with its `content_hash`, so a validator leg on the same box can
+read and verify it. Validators are separate stages in other packs (for IFC,
+`cairn-operator-ifc-eval`'s `eval.ifc_validate`), composed by the domain pack's pipeline; this
+package knows nothing of them.
+
+**Failure modes:** as `eval.lm_eval`. A projection over budget, no test split, a split whose bytes
+changed, a split with no usable row, or an adapter that cannot be read fail the leg. A backend that
+is not installed or fails while generating returns `checked: false` with the reason, no scores and
+no samples file. The stub tier answers with deterministic placeholders and is never `checked`.
+
+**Security.** Unlike the results file, the samples file holds rows of the test split (the prompts
+and references) and the models' answers. It is written to the box's job directory and to the
+checkpoint bucket the trainer already writes the adapter and checkpoints to, never to the record:
+the stats carry the scores only.
+
+**Risk class:** `external_write`, as `eval.lm_eval`. **Contract:** none yet.
+
 ## 4. Configuration
 
 | Setting | Where | Scope | Default | What it does |
@@ -365,4 +409,5 @@ it runs after the wheel is installed (`test_wheels.sh` does both).
 | 2026-10-26 | Review fixes before the first release: the endpoint key goes to the harness call as an explicit header, never `os.environ` (ADR-0143 D3), and a named key the run cannot read is a refusal; the harness runs in a worker thread (ADR-0125); the seam drops arguments the installed `simple_evaluate` does not take (0.4.13 has no decontamination argument); a case's cost is counted once. Read against lm-eval 0.4.13's source; no contract change. | |
 | 2026-10-26 | Second review: `[harness]` bounded to `lm-eval>=0.4.10,<0.5` (the releases read); the seam refuses when the installed `simple_evaluate` does not take `limit` or `num_fewshot`, and refuses when the built model's effective header is not the one passed; other dropped arguments, including the decontamination request, are named in the note; the key is redacted from failure notes. No contract change. | |
 | 2026-10-26 | Third review: `[harness]` capped at `<0.4.14` (the releases whose source was read: 0.4.10–0.4.13). The tokenizer probe during construction authenticates only with the run's own key, or with none (`openai_completions.py:35`, `utils.py:873-874` in 0.4.13); a later release is admitted only after its source is read the same way. | |
+| 2026-10-27 | 0.3.0 (cairn-extensions#41): the `eval.generate` flow-stage kernel (§3b) on the same backend seam — both models' answers to held-out prompts, the baseline scorers, a samples file a validator stage can read. The seam gains `generate` and `render(..., add_generation_prompt=...)`; `box_io.results_target` takes the key name. `eval.lm_eval` and `eval/lm-eval` are unchanged. | |
 | 2026-10-27 | 0.2.0 (cairn-extensions#42): the `eval.lm_eval` flow-stage kernel (§3a) — base model and base + adapter scored in process on the GPU box with identical settings, held-out split loss by one named method, a time probe that refuses a run projected past the leg's timeout, per-task scores ± standard error, deltas and a results file uploaded beside the run's checkpoints. The `[box]` and `test` extras; the `forgetting` and `forgetting-ifeval` presets and a per-task `limits` table; the result parsing moved to `scoring.py` (shared, unchanged); `eval/lm-eval` refuses a preset that sizes tasks apart (one harness call cannot honour per-task limits). The operator's ref, version, schemas and reports are unchanged. | |

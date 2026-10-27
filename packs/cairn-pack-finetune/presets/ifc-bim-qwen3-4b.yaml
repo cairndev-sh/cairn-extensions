@@ -35,3 +35,8 @@ presets:
       # The ml legs run on an ssh box: the adapter is published where the control plane can
       # reach it (CAIRN_CHECKPOINT_BUCKET), not left on the box's disk.
       artifact_target: s3
+      # The generate leg's answers are checked as IFC (cairn-operator-ifc-eval). The dataset card's
+      # example answer is STEP instances with an IfcProject whose OwnerHistory is unset (`$`), which
+      # IFC4 allows and IFC2X3 does not. The ifc leg scores the reference answers too: if IFC4 is
+      # the wrong schema for this data, the references' rate shows it first.
+      ifc_schema: IFC4

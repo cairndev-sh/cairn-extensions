@@ -1,4 +1,5 @@
-"""The in-process SEAM of the on-box ``eval.lm_eval`` stage (cairn-extensions#42).
+"""The in-process SEAM of the on-box ``eval.lm_eval`` and ``eval.generate`` stages
+(cairn-extensions#42, #41).
 
 Everything the stage needs from torch, transformers, peft and lm-eval is behind
 :class:`Backend`, so the stage's logic (the time probe, both passes with identical settings, the
@@ -11,6 +12,9 @@ deltas, the split loss and the results file) runs and is tested without a GPU an
   (``peft.PeftModel``) and scores it again with the same calls. Read against lm-eval 0.4.13
   (``models/huggingface.py`` 217-230: a pre-initialised model is taken as is) and transformers 5.5;
   not run here (no GPU): the first live run proves it (``DESIGN.md`` §7).
+  For ``eval.generate`` it renders each prompt with the adapter's chat template and the generation
+  prompt, and decodes greedily (``model.generate``, ``do_sample=False``) in left-padded batches, the
+  base model first and then the same loaded weights with the adapter attached.
 * :class:`StubBackend` — the stub tier (``stub: true``): no model, deterministic placeholder
   numbers, so the pipeline's every leg, gate and record run in CI. The stage marks its output
   ``stub`` and never ``checked``.
@@ -42,6 +46,11 @@ CHATML = (
     "{% endfor %}"
     "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
 )
+
+#: End-of-turn tokens of the common chat templates (ChatML's, Llama 3's, Phi's): generation stops at
+#: whichever of them the tokenizer knows, as well as at its EOS. A base model's EOS is often not
+#: the token its chat template closes a turn with.
+END_OF_TURN = ("<|im_end|>", "<|eot_id|>", "<|end|>")
 
 #: The ``simple_evaluate`` arguments a pass may never lose: ``limit`` bounds the cost,
 #: ``num_fewshot`` defines the scores, and the seeds make base and candidate comparable.
@@ -83,7 +92,11 @@ class Backend(Protocol):
 
     def check_adapter(self, adapter: str) -> None: ...
 
-    def render(self, loaded: Loaded, messages: list[dict], template: str) -> str: ...
+    def render(self, loaded: Loaded, messages: list[dict], template: str, *,
+               add_generation_prompt: bool = False) -> str: ...
+
+    def generate(self, loaded: Loaded, prompts: list[str], *, max_new_tokens: int, max_seq_len: int,
+                 seed: int) -> tuple[list[str], Timing]: ...
 
     def attach(self, loaded: Loaded, adapter: str) -> Loaded: ...
 
@@ -201,8 +214,47 @@ class HfBackend:
 
         PeftConfig.from_pretrained(adapter)
 
-    def render(self, loaded: Loaded, messages: list[dict], template: str) -> str:
-        return loaded.tokenizer.apply_chat_template(messages, tokenize=False, chat_template=template)
+    def render(self, loaded: Loaded, messages: list[dict], template: str, *,
+               add_generation_prompt: bool = False) -> str:
+        return loaded.tokenizer.apply_chat_template(messages, tokenize=False, chat_template=template,
+                                                    add_generation_prompt=add_generation_prompt)
+
+    def generate(self, loaded: Loaded, prompts: list[str], *, max_new_tokens: int, max_seq_len: int,
+                 seed: int) -> tuple[list[str], Timing]:
+        """Greedy answers to ``prompts`` (one batch, left-padded): ``do_sample=False``, so the seed
+        only fixes what greedy decoding leaves to chance (ties broken on device). A prompt longer
+        than ``max_seq_len`` tokens keeps its END (the question and the generation prompt). The
+        rendered text already carries the template's special tokens, so the tokenizer adds none
+        unless the text lacks the BOS token the tokenizer would add. Generation stops at the
+        tokenizer's EOS or the template's end-of-turn token, whichever comes first."""
+        import torch  # noqa: PLC0415
+
+        tok = loaded.tokenizer
+        torch.manual_seed(seed)
+        saved = (tok.padding_side, tok.truncation_side, tok.pad_token)
+        tok.padding_side, tok.truncation_side = "left", "left"
+        if tok.pad_token is None:
+            tok.pad_token = tok.eos_token
+        bos = getattr(tok, "bos_token", None)
+        vocab = tok.get_vocab()
+        stops = sorted({i for i in ([tok.eos_token_id] if isinstance(tok.eos_token_id, int) else
+                                    list(tok.eos_token_id or [])) if i is not None}
+                       | {vocab[t] for t in END_OF_TURN if t in vocab})
+        device = next(loaded.model.parameters()).device
+        timing = Timing()
+        try:
+            enc = tok(prompts, return_tensors="pt", padding=True, truncation=True, max_length=max_seq_len,
+                      add_special_tokens=not (bos and all(p.startswith(bos) for p in prompts))).to(device)
+            started = time.monotonic()
+            with torch.no_grad():
+                out = loaded.model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False,
+                                            eos_token_id=stops or None, pad_token_id=tok.pad_token_id)
+            timing.model_s, timing.requests = time.monotonic() - started, len(prompts)
+            answers = [tok.decode(row, skip_special_tokens=True).strip()
+                       for row in out[:, enc["input_ids"].shape[1]:]]
+        finally:
+            tok.padding_side, tok.truncation_side, tok.pad_token = saved
+        return answers, timing
 
     def attach(self, loaded: Loaded, adapter: str) -> Loaded:
         from peft import PeftModel  # noqa: PLC0415
@@ -283,8 +335,16 @@ class StubBackend:
     def check_adapter(self, adapter: str) -> None:
         return None
 
-    def render(self, loaded: Loaded, messages: list[dict], template: str) -> str:
-        return "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
+    def render(self, loaded: Loaded, messages: list[dict], template: str, *,
+               add_generation_prompt: bool = False) -> str:
+        text = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
+        return text + ("<|im_start|>assistant\n" if add_generation_prompt else "")
+
+    def generate(self, loaded: Loaded, prompts: list[str], *, max_new_tokens: int, max_seq_len: int,
+                 seed: int) -> tuple[list[str], Timing]:
+        who = "candidate" if loaded.adapter else "base model"
+        return ([f"stub {who} answer {_unit(p, seed, loaded.adapter):.6f}" for p in prompts],
+                Timing(requests=len(prompts), model_s=0.0))
 
     def attach(self, loaded: Loaded, adapter: str) -> Loaded:
         return Loaded(model=None, tokenizer=None, quantization=loaded.quantization, adapter=adapter,
@@ -316,4 +376,4 @@ def make_backend(*, stub: bool) -> Backend:
     return StubBackend() if stub else HfBackend()
 
 
-__all__ = ["CHATML", "REQUIRED", "Backend", "HfBackend", "Loaded", "StubBackend", "Timing", "make_backend"]
+__all__ = ["CHATML", "END_OF_TURN", "REQUIRED", "Backend", "HfBackend", "Loaded", "StubBackend", "Timing", "make_backend"]

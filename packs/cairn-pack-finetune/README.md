@@ -6,9 +6,11 @@ prepared data only: registered `train`, `val` and `test` versions, as
 registered with those roles). A rerun or a sweep reads the same frozen versions.
 
 A domain pack: YAML, a profile and presets, no code. The training stages come from
-[`cairn-operator-training`](../../packages/cairn-operator-training), the evaluation stage
-(`eval.lm_eval`: benchmarks and held-out loss for the base model and the candidate, on the GPU box)
-from [`cairn-operator-eval-lm`](../../packages/cairn-operator-eval-lm).
+[`cairn-operator-training`](../../packages/cairn-operator-training), the evaluation stages
+(`eval.lm_eval`: benchmarks and held-out loss for the base model and the candidate; `eval.generate`:
+their answers to held-out prompts, scored; both on the GPU box) from
+[`cairn-operator-eval-lm`](../../packages/cairn-operator-eval-lm), and the IFC validator
+(`eval.ifc_validate`) from [`cairn-operator-ifc-eval`](../../packages/cairn-operator-ifc-eval).
 
 ## Which pipeline
 
@@ -29,7 +31,8 @@ skip the box steps and `compute_connection`, and launch `finetune/sft-own-box`.
 ## The `sft` pipeline
 
 ```
-approve-run ⏸ → acquire → smoke → smoke-ok → train → eval → release-box → improved → promote-model ⏸ → promote ⏸
+approve-run ⏸ → acquire → smoke → smoke-ok → train → eval → generate → ifc (when ifc_schema is set)
+  → release-box → improved → promote-model ⏸ → promote ⏸
                                                             finally (done, failed or cancelled): release
 ```
 
@@ -63,13 +66,21 @@ approve-run ⏸ → acquire → smoke → smoke-ok → train → eval → releas
   both models' loss on `val_version` and `test_version` by one named method. 3-hour timeout, a
   second attempt after a kill, and a time probe that refuses the leg up front when the run would
   not fit.
-- **`release-box`:** `compute/release` stops the box as soon as `eval`, the last GPU leg, is
-  done, so it does not bill while a person decides on promotion.
+- **`generate`:** the [`sft-generate`](flows/sft-generate.yaml) flow on the same box (see
+  [The generated answers](#the-generated-answers)): the base model and the candidate answer
+  `generate_sample_n` (default 50) prompts from `test_version`, scored against the references.
+  1-hour timeout, a second attempt after a kill.
+- **`ifc`:** only when the launch names `ifc_schema` (the `ifc-bim-qwen3-4b` presets name `IFC4`):
+  the [`ifc-validate`](flows/ifc-validate.yaml) flow checks the generated answers as IFC. Otherwise
+  it is routed off and the pipeline continues. 15-minute timeout, a second attempt after a kill.
+- **`release-box`:** `compute/release` stops the box as soon as the last box leg (`generate`, or
+  `ifc` when it runs) is done, so it does not bill while a person decides on promotion.
 - **`improved`:** the candidate's validation loss must be below the base model's.
 - **`promote-model`:** a person decides, with the losses and the evaluation on the card: the
   benchmark deltas (candidate − base) with their standard errors, the worst delta, how many
-  metrics regressed beyond their standard error, and both models' validation and test loss.
-  Shown, not gated: a predicate on the deltas comes once real runs have sized the noise.
+  metrics regressed beyond their standard error, both models' validation and test loss, the
+  generated answers' scores for both models and their deltas, and, when `ifc` ran, both models'
+  IFC parse validity and schema error rates. Shown, not gated: a predicate on the deltas comes once real runs have sized the noise.
 - **`promote`:** `artifact/promote` points `tag` at the adapter, after its own approval.
 - **`release`:** the same `compute/release`, declared `finalizer: true`: it runs once the pipeline
   is done, failed or cancelled, whatever the chain reached, and a box already stopped is a
@@ -107,8 +118,41 @@ box, after `train` and before the box stops:
   training run is never lost to its evaluation. A split whose bytes changed since it was
   registered fails the leg.
 
-**Not yet:** a generation-quality evaluation, generated answers scored for base and candidate
-(cairn-extensions#41). The verdict is still validation loss against the base model's.
+### The generated answers
+
+Loss says how likely the reference answers are, not whether the model's own answers are usable.
+The `generate` leg (cairn-extensions#41) runs `cairn-operator-eval-lm`'s `eval.generate` stage on
+the box after `eval`:
+
+- **The same prompts and decoding for both models.** `generate_sample_n` rows are drawn from
+  `test_version` with `eval_seed` (every row when there are fewer); each row's turns before the
+  last are the prompt and its last answer is the reference. The base model is loaded once (4-bit
+  for `qlora`), the prompts are rendered with the chat template the adapter was trained with, and
+  both models answer greedily, up to `generate_max_new_tokens` (512) tokens; the candidate is the
+  adapter attached to the same weights.
+- **Baseline scorers:** `exact_match` (equal after collapsing whitespace) and `contains` (the
+  reference appears in the answer), each model's mean, and the delta with a binomial standard
+  error (which over-states it: the two models answer the same prompts).
+- **The samples file:** every prompt, reference and both answers with their scores, one JSON line
+  each, uploaded beside the run's checkpoints when the box sets `CAIRN_CHECKPOINT_BUCKET`
+  (`…/<generate run>/eval/generation_samples.jsonl`) and registered as the leg's `report`
+  artifact. Read it to see what the models actually wrote.
+- **The time projection:** after the first batch the leg projects the run (both models, the
+  candidate priced 1.25× the base) and fails at once with the figures when it would not fit the
+  leg's hour less 10 %. Lower `generate_sample_n` or `generate_max_new_tokens`.
+- **A validator after it.** Which validator legs follow `generate` is the pipeline's choice, made
+  by its inputs. `ifc_schema` (`IFC2X3`, `IFC4` or `IFC4X3_ADD2`) turns on the `ifc` leg:
+  `cairn-operator-ifc-eval`'s `eval.ifc_validate` reads the samples file on the box, checks its
+  bytes against the hash the generate leg reported, and reports for the reference answers, the base
+  model and the candidate: `parse_valid_rate`, `schema_error_rate` and `valid_rate`, the
+  candidate's deltas, and a results file with every row's failures. The references are scored too:
+  if they do not parse under the schema, the schema is the wrong one. Neither leg gates.
+- **When it cannot measure** (the `[box]` extras missing on the box, a CUDA out-of-memory), the
+  leg reports `checked: false` with the reason and writes no samples, and the `ifc` leg then
+  reports `checked: false` too. A test split whose bytes changed since it was registered, or a
+  samples file that changed between the two legs, fails the leg.
+
+The verdict is still validation loss against the base model's.
 
 ## Run it
 
@@ -116,7 +160,7 @@ Two machines: the **control plane** (the engine, the data leg, the gates and eve
 torch) and a **GPU box** reached over SSH, which runs only the trainer. Every command below is
 the `cairn` CLI; `<pl_id>` is a pipeline id (`pl_…`), `<run_id>` one leg's run.
 
-**Which cairndev.** This pack (0.2.0) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
+**Which cairndev.** This pack (0.3.0) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
 `compute/acquire` and `compute/release`, prices a leg on a box with `hourly_usd`, and cancels the
 job on the box before a cancelled pipeline's release stops it. CI proves it on the newest release
 in that range.
@@ -125,18 +169,19 @@ in that range.
 
 ```bash
 pip install 'cairndev[ssh]' cairn-pack-dataset-prep cairn-pack-finetune   # the control plane (brings boto3)
-pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]'  # the GPU box; add ,track-mlflow for MLflow
+pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]' 'cairn-operator-ifc-eval[box]'  # the GPU box; add ,track-mlflow for MLflow
 ```
 
 `cairn-operator-eval-lm[box]` is lm-evaluation-harness with its `hf` backend and IFEval's checkers,
-for the `eval` leg; the trainer's extra pins the torch, transformers, peft and bitsandbytes both
-use. The box downloads the base model and the benchmark datasets from the Hugging Face Hub.
+for the `eval` and `generate` legs; the trainer's extra pins the torch, transformers, peft and
+bitsandbytes both use. `cairn-operator-ifc-eval[box]` is IfcOpenShell, for the `ifc` leg. The box downloads the base model and the benchmark datasets from the Hugging Face Hub.
 
 To run unreleased changes, install from a checkout of this repository: on the control plane
 `pip install 'cairndev[ssh]' ./packages/cairn-contracts-* ./packages/cairn-operator-*
 ./packs/cairn-pack-dataset-prep ./packs/cairn-pack-finetune`, and on the box `pip install
 ./packages/cairn-contracts-training ./packages/cairn-contracts-training-stages
-'./packages/cairn-operator-training[gpu]' './packages/cairn-operator-eval-lm[box]'`. The control plane starts and stops the box through
+'./packages/cairn-operator-training[gpu]' './packages/cairn-operator-eval-lm[box]'
+'./packages/cairn-operator-ifc-eval[box]'`. The control plane starts and stops the box through
 boto3, a dependency of `cairn-pack-finetune` (cairndev declares it only in an extra). The box must run the same `cairn-contracts-training*`
 versions as the control plane, and needs `cairn-dataflow-run` on its non-interactive SSH `PATH`
 (`ssh <box> 'which cairn-dataflow-run'`), or `CAIRN_DATAFLOW_REMOTE_CMD=<venv>/bin/cairn-dataflow-run`
@@ -224,12 +269,12 @@ cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b -i stub=true --watch
 ```
 
 The stub trainer (`stub=true`) runs every leg, gate and record on the box without a GPU and
-trains nothing; the `eval` leg's stub loads no model and reports placeholder numbers marked `stub`,
-never `checked`. Its validation loss is not below its baseline, so `improved` stops it: a stub
+trains nothing; the `eval` and `generate` legs' stubs load no model and report placeholder numbers
+marked `stub`, never `checked`. Its validation loss is not below its baseline, so `improved` stops it: a stub
 adapter never reaches a person who could promote it. With `CAIRN_CHECKPOINT_BUCKET` set on the
 box, the smoke leg writes a stub checkpoint there, which shows the box can write to the bucket.
 It is a real run on the box, so after `approve-run` it starts the box (real EC2 calls, a few
-minutes of box time) and stops it after `eval`; the finalizer finds it stopped.
+minutes of box time) and stops it after `generate` (or `ifc`); the finalizer finds it stopped.
 
 ### 6. Train, and the three approvals
 
@@ -237,7 +282,7 @@ minutes of box time) and stops it after `eval`; the finalizer finds it stopped.
 cairn remote presets finetune/sft
 cairn remote launch finetune/sft --preset ifc-bim-qwen3-4b --watch
 cairn remote advance <pl_id> approve-run                    # 1. before any GPU time, with the estimate on the card
-cairn remote advance <pl_id> promote-model                  # 2. after `improved` (the box is already stopped), with the losses and the eval deltas on the card
+cairn remote advance <pl_id> promote-model                  # 2. after `improved` (the box is already stopped), with the losses, the eval deltas and the generated answers' scores on the card
 cairn remote advance <pl_id> promote                        # 3. artifact/promote's own approval
 ```
 
@@ -272,8 +317,9 @@ cairn replay <run_id> --source db                   # the recorded events as a t
   mirrors each one to `s3://<CAIRN_CHECKPOINT_BUCKET>/<prefix>/<run-id>/`. It writes under the
   leg's job directory on the box (`train-output/<output_name>`), so two runs never share
   checkpoints. The published adapter is the adapter files, without the checkpoints.
-- **`smoke`, `train` and `eval` declare `retry: {max_attempts: 2}`** (an ml leg otherwise gets
-  one attempt). A killed `eval` starts its evaluation again; it has nothing to resume from. When an attempt's process dies without writing its exit code (the OOM killer, a
+- **Every ml leg (`smoke`, `train`, `eval`, `generate`, `ifc`) declares `retry: {max_attempts: 2}`**
+  (an ml leg otherwise gets one attempt). A killed `eval`, `generate` or `ifc` starts again; it has
+  nothing to resume from. When an attempt's process dies without writing its exit code (the OOM killer, a
   kill on the box), the engine reports it retriable and the leg runs once more under the
   same run; the trainer pulls that run's newest checkpoint from `CAIRN_CHECKPOINT_BUCKET` and
   continues from its step. A leg that fails on its own error (a clean non-zero exit) is not
@@ -281,33 +327,35 @@ cairn replay <run_id> --source db                   # the recorded events as a t
 - **Budget:** `governance.budget: {usd: 25}` on the `sft` series, sized to the priced legs'
   worst case. Before any record exists, the launch door checks `hourly_usd × timeout × 2
   attempts` for each ml leg against what the series has left: (30 min for `smoke` + 12 h for
-  `train` + 3 h for `eval`) × 2 = 31 box-hours, **$20.46 at $0.66/h**. A box dearer than $0.80/h is
-  refused at launch with the figures; give it a larger budget, or a copy of the pipeline with shorter timeouts. Each
+  `train` + 3 h for `eval` + 1 h for `generate` + 15 min for `ifc`) × 2 = 33.5 box-hours,
+  **$22.11 at $0.66/h**; `ifc` is priced whether or not the launch routes it off. A box dearer than
+  $0.74/h is refused at launch with the figures; give it a larger budget, or a copy of the pipeline with shorter timeouts. Each
   attempt reserves one attempt's figure before it is submitted, so an attempt the budget cannot
   cover fails the leg instead of starting, and every attempt settles its own box time (`Run.cost.gpu_usd`),
   failed or not. Not priced: the minutes between `acquire` and `smoke` (the boot) and between
-  `eval` and `release-box`; a connection without `hourly_usd` is "not priced", never $0. The launch
+  the last box leg and `release-box`; a connection without `hourly_usd` is "not priced", never $0. The launch
   checks the estimate against what the series has *left*, live holds included: while one `sft`
   attempt holds its train figure ($7.92), a second `sft` launch in the same series sees $17.08 left
   and is refused. Run one at a time, or give the series a larger budget.
 - **Cancel:** `cairn remote cancel-pipeline <pl_id>` stops the pipeline: no further leg starts.
-  If `smoke`, `train` or `eval` is running on the box, its job is cancelled first (the trainer is
+  If `smoke`, `train`, `eval`, `generate` or `ifc` is running on the box, its job is cancelled first (the trainer is
   killed, and the leg settles `cancelled`, not retried), then the finalizer `release` stops the
   box. A job cancel that fails is logged and audited (`leg_job_cancel`, `sent: false`), and the
   box is stopped anyway. The record reads `cancelled` once the release has settled.
-- **The box:** `sft` starts it after `approve-run` and stops it after `eval`, and the finalizer
+- **The box:** `sft` starts it after `approve-run` and stops it after its last box leg, and the finalizer
   stops it on every outcome that reaches it. Two gaps: a cancel that lands while `acquire` is
   still starting the box can leave it running (core cancels flow legs, not a task leg in flight),
-  and a `release-box` that fails after `eval` (a transient EC2 error) fails the pipeline before
+  and a `release-box` that fails after the last box leg (a transient EC2 error) fails the pipeline before
   `improved`: the candidate is registered, but promotion is manual. A failed `eval` (the time
-  probe's refusal, or a killed second attempt) fails the pipeline the same way, after `train`
+  probe's refusal, or a killed second attempt) fails the pipeline the same way, and so does a failed
+  `generate` or `ifc`, after `train`
   registered the adapter; `finetune/eval-adapter` can evaluate it later. In every case the
-  finalizer or the lease (below) stops the box. `acquire` stamps a lease of 32 hours
+  finalizer or the lease (below) stops the box. `acquire` stamps a lease of 35 hours
   (`cairn:release-after`) before the start: the retried worst case, 2 attempts × (30 min + 12 h +
-  3 h) = 31 h, plus an hour, so a sweep never stops the box under a retried `train` or `eval`. If
-  the control plane dies, `cairn compute sweep` lists the box once the lease has passed and
-  `--apply` stops it. **The trade-off:** until then an orphaned box keeps billing, up to 32 h
-  (about $21 at $0.66/h), so run the sweep from a cron, or stop the box yourself. `cairn compute status gpu` shows whether the box is up and what
+  3 h + 1 h + 15 min) = 33.5 h, plus a margin, so a sweep never stops the box under a retried leg.
+  If the control plane dies, `cairn compute sweep` lists the box once the lease has passed and
+  `--apply` stops it. **The trade-off:** until then an orphaned box keeps billing, up to 35 h
+  (about $23 at $0.66/h), so run the sweep from a cron, or stop the box yourself. `cairn compute status gpu` shows whether the box is up and what
   it costs per hour.
 
 ### 9. Evaluate an adapter you already have: `finetune/eval-adapter`
@@ -374,7 +422,7 @@ in your own profile, or use the core `secure` profile, to keep the audit log.
 
 | | |
 |---|---|
-| `presets/ifc-bim-qwen3-4b.yaml` | for `sft`: `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest` |
+| `presets/ifc-bim-qwen3-4b.yaml` | for `sft`: `Qwen/Qwen3-4B-Base`, QLoRA r 16, alpha 32, lr 2e-4, 2048 tokens, seed 3407, one epoch, batch 2 × 8, on `ifc-bim-alpaca-{train,val,test}@latest`; `ifc_schema: IFC4`, so the `ifc` leg checks the generated answers |
 | `presets/ifc-bim-qwen3-4b-own-box.yaml` | the same preset, `ifc-bim-qwen3-4b`, for `sft-own-box` (a preset file names one pipeline; a test keeps the two equal) |
 | `presets/ifc-bim-qwen3-4b-eval-adapter.yaml` | for `eval-adapter`, also named `ifc-bim-qwen3-4b`: the published adapter `hf://cairndev/qwen3-4b-ifc-bim-qlora` on the 4-bit base it was trained on (`unsloth/qwen3-4b-base-unsloth-bnb-4bit`), `forgetting-ifeval`, and the loss on `ifc-bim-alpaca-{val,test}@latest` |
 | `presets/ifc-bim-qwen3-4b-eval-adapter-own-box.yaml` | the same preset for `eval-adapter-own-box` |
@@ -392,8 +440,10 @@ in your own profile, or use the core `secure` profile, to keep the audit log.
 | the GPU estimate at launch and on `approve-run` | EXPERIMENTAL | `tests/test_sft_box.py`: the core's launch door prices `smoke` and `train` on a `gpu` connection at $0.66/h ($16.50, two attempts each), `approve-run`'s evidence carries it and no later gate's does, and a $1.50/h box is refused against the $25 budget before any record | 0.3.1 (a local run and CI) |
 | `sft-own-box`: `sft` without the box steps | EXPERIMENTAL | `tests/test_sft_box.py`: the file is pinned to `sft.yaml` key for key except the box steps and `compute_connection`; its plan has the same legs and gates and no compute step; the same stub run on the core's launch door and bridge makes no EC2 call and shows the estimate on `approve-run` | 0.3.1 (a local run and CI) |
 | `sft` on an ssh GPU box with QLoRA | not yet | the qualification run, cairn-extensions#9 | not yet |
-| `sft`'s `eval` leg: after `train`, priced (3 h × 2), the box stopped after it, the evaluation on the `promote-model` card | EXPERIMENTAL | `tests/test_sft_box.py`, `tests/test_sft.py`: the plan, the estimate ($20.46), the lease (32 h) and the budget; the `sft-eval` flow on the core runner with the stub tier and pinned versions, every `eval.*` figure the card shows present; the stub run on the core's launch door and bridge (the box stops after `eval`); a failed `eval` still stops the box | 0.3.1 (a local run and CI), stub tier only |
+| `sft`'s `eval` leg: after `train`, priced (3 h × 2), the evaluation on the `promote-model` card | EXPERIMENTAL | `tests/test_sft_box.py`, `tests/test_sft.py`: the plan, the estimate, the lease and the budget; the `sft-eval` flow on the core runner with the stub tier and pinned versions, every `eval.*` figure the card shows present; the stub run on the core's launch door and bridge; a failed `eval` still stops the box | 0.3.1 (a local run and CI), stub tier only |
+| `sft`'s `generate` leg and the `ifc` leg after it: priced (1 h × 2, 15 min × 2), the box stopped after the last of them, the scores on the `promote-model` card | EXPERIMENTAL | `tests/test_sft_box.py`, `tests/test_generate.py`: the plan, the estimate ($22.11), the lease (35 h) and the budget; the `sft-generate` flow on the core runner on the stub tier, every `generate.*` figure the card shows present; both flows chained on the core runner as the pipeline wires them (the ifc leg reads the samples file the generate leg wrote, verified by hash; the IFC references parse, the stub's placeholder answers do not); a changed samples file refused; the rates on real answers in `cairn-operator-ifc-eval`'s own tests; on the core's launch door and bridge: `ifc` routed off without `ifc_schema`, run on the box with it, the box stopped after the last leg | 0.3.1 (a local run and CI), stub tier only |
 | `finetune/eval-adapter` and its own-box copy | EXPERIMENTAL | `tests/test_eval_adapter.py`: the plan, the 6 h leg and its time budget, the lease and the budget ($7.92); the tag refusal; the own-box copy and the presets pinned; on the core's launch door and bridge with a fake EC2: the estimate on `approve-run`, the box stopped after `eval`, the stub stopped at `evaluated`, a measured (faked) evaluation passing it | 0.3.1 (a local run and CI), faked backend |
 | the evaluation on a GPU (lm-eval's `hf` backend, 4-bit loading, the time probe's accuracy) | not yet | needs a GPU run | not yet |
+| the generated answers on a GPU (greedy generation with the trained chat template, the first-batch projection), and an IFC run's parse rates on the card | not yet | needs a GPU run | not yet |
 
 Apache-2.0 — see [`LICENSE`](LICENSE).

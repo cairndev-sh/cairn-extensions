@@ -10,14 +10,15 @@
 #
 # The in-process shape exists too, as a flow-stage KERNEL rather than an operator
 # (cairn-extensions#42): `eval.lm_eval` in the `cairn.flow_stages` entry-point group
-# (pyproject.toml), run as an ml leg on the GPU box by a domain pack's flow. Flow stages are not
-# listed in this manifest; the operator below is unchanged.
+# (pyproject.toml), run as an ml leg on the GPU box by a domain pack's flow; and `eval.generate`
+# (cairn-extensions#41), the base model's and the candidate's answers to held-out prompts, scored,
+# in the same group. Flow stages are not listed in this manifest; the operator below is unchanged.
 
 [pack]
 name        = "cairn-operator-eval-lm"
-version     = "0.2.0"
+version     = "0.3.0"
 type        = "operator"
-description = "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box; presets as pack data."
+description = "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box, eval.generate their answers to held-out prompts; presets as pack data."
 kind        = "operator"
 publisher   = "cairn"
 trust_level = "official"

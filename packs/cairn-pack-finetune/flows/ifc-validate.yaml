@@ -1,0 +1,29 @@
+# flows/ifc-validate.yaml — a generation eval's answers checked as IFC, for the reference, the base
+# model and the candidate (cairn-extensions#12, #41). The stage is cairn-operator-ifc-eval's
+# `eval.ifc_validate` kernel; it runs as its own ml leg on the GPU box, where the `generate` leg's
+# samples file is (or reads it from the checkpoint bucket). `finetune/sft` runs it only when the
+# launch names an IFC schema (`ifc_schema`): which validator legs follow `generate` is the
+# pipeline's choice, made by its inputs.
+#
+# No GPU: IfcOpenShell parses and validates on the CPU. It still runs on the box, because the
+# samples file is there.
+
+name: ifc-validate
+kind: ml
+description: >
+  Check a generation eval's answers as IFC (do they parse, do they hold to the schema) for the
+  reference, the base model and the candidate, and report the candidate's rates against the base
+  model's.
+
+stages:
+  - stage: eval.ifc_validate
+    config:
+      samples_path: $config.samples_path
+      samples_uri: $config.samples_uri
+      samples_sha256: $config.samples_sha256
+      schema_version: $config.schema_version
+      fields: $config.fields
+      stub: $config.stub
+    resources:
+      gpu: 0
+      cpu: 1

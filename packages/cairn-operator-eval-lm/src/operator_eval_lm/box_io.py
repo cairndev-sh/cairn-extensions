@@ -1,4 +1,5 @@
-"""What the on-box ``eval.lm_eval`` stage reads and writes (cairn-extensions#42).
+"""What the on-box ``eval.lm_eval`` and ``eval.generate`` stages read and write (cairn-extensions#42,
+#41).
 
 The stage runs in ``cairn-dataflow-run`` on the GPU box, with no database and no control plane in
 reach. It reads three things and writes one:
@@ -34,6 +35,8 @@ from urllib.parse import unquote, urlparse
 DEFAULT_PREFIX = "cairn-checkpoints"
 #: Where the results file goes under the run's key.
 RESULTS_KEY = "eval/lm_eval_results.json"
+#: Where ``eval.generate``'s samples file goes under the run's key (cairn-extensions#41).
+SAMPLES_KEY = "eval/generation_samples.jsonl"
 
 
 class FetchError(RuntimeError):
@@ -180,15 +183,16 @@ def run_key() -> str:
             or os.environ.get("CAIRN_PARENT_RUN", "").strip())
 
 
-def results_target() -> tuple[str, str] | None:
-    """``(bucket, key)`` for the results file, or ``None`` without ``CAIRN_CHECKPOINT_BUCKET`` or
-    without a run to key it by (a shared key would let two runs overwrite each other's results)."""
+def results_target(name: str = RESULTS_KEY) -> tuple[str, str] | None:
+    """``(bucket, key)`` for a results file (``name`` under the run's key: ``RESULTS_KEY``, or
+    ``SAMPLES_KEY`` for ``eval.generate``'s samples), or ``None`` without ``CAIRN_CHECKPOINT_BUCKET``
+    or without a run to key it by (a shared key would let two runs overwrite each other's results)."""
     bucket = os.environ.get("CAIRN_CHECKPOINT_BUCKET", "").strip()
     key = run_key()
     if not bucket or not key:
         return None
     prefix = os.environ.get("CAIRN_CHECKPOINT_PREFIX", DEFAULT_PREFIX).strip("/") or DEFAULT_PREFIX
-    return bucket, f"{prefix}/{key}/{RESULTS_KEY}"
+    return bucket, f"{prefix}/{key}/{name}"
 
 
 def upload_results(path: Path, bucket: str, key: str) -> str:
@@ -201,5 +205,5 @@ def upload_results(path: Path, bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
 
-__all__ = ["DEFAULT_PREFIX", "RESULTS_KEY", "FetchError", "fetch_dataset", "read_jsonl", "resolve_adapter",
+__all__ = ["DEFAULT_PREFIX", "RESULTS_KEY", "SAMPLES_KEY", "FetchError", "fetch_dataset", "read_jsonl", "resolve_adapter",
            "results_target", "run_key", "s3_client", "split_pin", "upload_results"]

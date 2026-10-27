@@ -1,8 +1,9 @@
 """finetune/sft starts and stops its GPU box, and the approver sees the estimate
-(cairn-extensions#26, #27, #42; cairndev-sh/cairn ADR-0151 D4, D9, D11).
+(cairn-extensions#26, #27, #42, #41; cairndev-sh/cairn ADR-0151 D4, D9, D11).
 
 The plan: `compute/acquire` after `approve-run` and before `smoke`; `compute/release` right after
-`eval`, the last GPU leg (#42); a `finalizer:` `compute/release` as the backstop. Then the pipeline on
+the last box leg (`generate`, or `ifc` when the launch names an IFC schema: #41); a `finalizer:`
+`compute/release` as the backstop. Then the pipeline on
 the core's own launch door and in-process bridge, with this pack's `sft` definition and the
 `finetune-ssh` profile: the door prices the ml legs on the `gpu` connection and the estimate is in
 `approve-run`'s evidence; the box is started after the approval and stopped before a person
@@ -28,8 +29,11 @@ PACK = Path(__file__).resolve().parents[1]
 PROFILE = PACK / "profiles" / "finetune-ssh.toml"
 _FLOW = "flow:finetune/sft-train"
 _EVAL = "flow:finetune/sft-eval"
-#: The ml legs, each priced on the box: the two trainer legs and the evaluation (#42).
-_ML = (_FLOW, _EVAL)
+_GENERATE = "flow:finetune/sft-generate"
+_IFC = "flow:finetune/ifc-validate"
+#: The ml legs, each priced on the box: the two trainer legs, the evaluation (#42), the generation
+#: eval and the IFC validator after it (#41; priced whether or not a launch routes it off).
+_ML = (_FLOW, _EVAL, _GENERATE, _IFC)
 
 
 #: The steps `sft` has and `sft-own-box` does not: the box cairn starts and stops (#26).
@@ -53,16 +57,19 @@ def test_the_box_is_started_after_approval_and_stopped_after_the_last_gpu_leg():
     plan = _plan()
     steps = {s.id: s for s in plan.steps}
     order = [s.id for s in plan.steps if not s.finalizer]
-    assert order == ["approve-run", "acquire", "smoke", "smoke-ok", "train", "eval", "release-box",
-                     "improved", "promote-model", "promote"]
+    assert order == ["approve-run", "acquire", "smoke", "smoke-ok", "train", "eval", "generate", "ifc",
+                     "release-box", "improved", "promote-model", "promote"]
     assert steps["acquire"].ref == "task:compute/acquire" and steps["acquire"].depends_on == ["approve-run"]
     assert steps["smoke"].depends_on == ["acquire"]
     gpu_legs = [s.id for s in plan.steps if s.ref in _ML]
-    assert gpu_legs == ["smoke", "train", "eval"]
+    assert gpu_legs == ["smoke", "train", "eval", "generate", "ifc"]
     assert steps["eval"].ref == _EVAL and steps["eval"].depends_on == ["train"]
-    # the release follows the last GPU leg directly, before the person gate on the model
-    assert steps["release-box"].ref == "task:compute/release" and steps["release-box"].depends_on == ["train", "eval"]
-    assert {"eval", "release-box"} <= set(steps["improved"].depends_on)
+    assert steps["generate"].ref == _GENERATE and steps["generate"].depends_on == ["eval"]
+    assert steps["ifc"].ref == _IFC and steps["ifc"].depends_on == ["generate"] and steps["ifc"].when
+    # the release follows the last box leg directly, before the person gate on the model
+    assert steps["release-box"].ref == "task:compute/release"
+    assert steps["release-box"].depends_on == ["train", "eval", "generate", "ifc"]
+    assert {"eval", "generate", "ifc", "release-box"} <= set(steps["improved"].depends_on)
     assert order.index("release-box") < order.index("promote-model")
     for s in (steps["acquire"], steps["release-box"]):
         assert s.inputs["connection"] == "$input.compute_connection"
@@ -88,12 +95,12 @@ def test_both_releases_are_the_operator_the_core_cancels_jobs_before():
 
 def test_the_lease_covers_the_retried_worst_case_plus_a_margin():
     """A sweep must never stop the box under a retried leg: the lease is every attempt of every
-    ml leg, 2 × (30m + 12h + 3h) = 31h, plus a margin of at most two hours (an orphaned box bills
-    until the lease expires)."""
+    ml leg, 2 × (30m + 12h + 3h + 1h + 15m) = 33.5h, plus a margin of at most two hours (an
+    orphaned box bills until the lease expires)."""
     plan = _plan()
     worst_h = sum(s.timeout_s * s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref in _ML) / 3600
     max_hours = next(s for s in plan.steps if s.id == "acquire").inputs["max_hours"]
-    assert worst_h == 31.0
+    assert worst_h == 33.5 and max_hours == 35
     assert worst_h < max_hours <= worst_h + 2, (worst_h, max_hours)
 
 
@@ -105,11 +112,12 @@ def test_compute_connection_defaults_to_the_profiles_ml_target():
 
 
 def test_the_budget_covers_the_documented_worst_case():
-    """#27, #42: (30m + 12h + 3h) × 2 attempts at the example $0.66/h fits `governance.budget.usd`."""
+    """#27, #42, #41: (30m + 12h + 3h + 1h + 15m) × 2 attempts at the example $0.66/h fits
+    `governance.budget.usd`."""
     plan = _plan()
     attempts = {s.id: s.inputs["retry"]["max_attempts"] for s in plan.steps if s.ref in _ML}
     hours = sum(s.timeout_s / 3600 * attempts[s.id] for s in plan.steps if s.ref in _ML)
-    assert hours == 31.0 and round(0.66 * hours, 2) == 20.46 <= _pipeline()["governance"]["budget"]["usd"]
+    assert hours == 33.5 and round(0.66 * hours, 2) == 22.11 <= _pipeline()["governance"]["budget"]["usd"]
 
 
 def test_the_eval_leg_is_priced_retried_and_its_time_budget_is_its_timeout():
@@ -119,6 +127,17 @@ def test_the_eval_leg_is_priced_retried_and_its_time_budget_is_its_timeout():
         ev = next(s for s in _plan(name).steps if s.id == "eval")
         assert ev.timeout_s == 3 * 3600 and ev.inputs["retry"] == {"max_attempts": 2}, name
         assert ev.inputs["time_budget_s"] == ev.timeout_s, name
+
+
+def test_the_generation_legs_are_priced_and_retried_and_generates_time_budget_is_its_timeout():
+    """#41: `generate` is an ml leg like `eval` (a timeout, two attempts, `time_budget_s` equal to the
+    timeout); `ifc` is a 15-minute ml leg with two attempts, priced even when routed off."""
+    for name in ("sft", "sft-own-box"):
+        steps = {s.id: s for s in _plan(name).steps}
+        gen, ifc = steps["generate"], steps["ifc"]
+        assert gen.timeout_s == 3600 and gen.inputs["retry"] == {"max_attempts": 2}, name
+        assert gen.inputs["time_budget_s"] == gen.timeout_s, name
+        assert ifc.timeout_s == 900 and ifc.inputs["retry"] == {"max_attempts": 2}, name
 
 
 # ── sft-own-box: the same pipeline on a box cairn does not start or stop ──────
@@ -155,7 +174,7 @@ def test_sft_own_box_plans_the_same_legs_and_gates_and_no_compute_step():
     assert [(s.id, s.ref, s.timeout_s) for s in own.steps] == [
         (s.id, s.ref, s.timeout_s) for s in sft.steps if s.id not in _BOX_STEPS]
     deps = {s.id: s.depends_on for s in own.steps}
-    assert deps["smoke"] == ["approve-run"] and deps["improved"] == ["train", "eval"]
+    assert deps["smoke"] == ["approve-run"] and deps["improved"] == ["train", "eval", "generate", "ifc"]
 
 
 def test_the_presets_are_the_same_for_both_pipelines():
@@ -191,8 +210,13 @@ class FakeBoxEngine:
         from cairn.core.dataflow.engine import EngineJobHandle, EngineJobStatus
         from cairn.core.dataflow.runner import run_dataflow
 
-        if any(st.stage == "eval.lm_eval" for st in spec.stages):
+        stages = {st.stage for st in spec.stages}
+        if "eval.lm_eval" in stages:
             step = "eval"
+        elif "eval.generate" in stages:
+            step = "generate"
+        elif "eval.ifc_validate" in stages:
+            step = "ifc"
         else:
             step = "smoke" if any((st.config or {}).get("fidelity_rows") for st in spec.stages) else "train"
         job = f"job-{step}"
@@ -248,25 +272,27 @@ async def test_the_launch_door_prices_the_gpu_legs_and_approve_run_shows_the_est
     await launch_pipeline_def(_sft(), inputs=_INPUTS, bridge=bridge)
     admission = bridge.kw["admission"]
     est = admission["cost_estimate"]
-    assert est["estimate_usd"] == pytest.approx(20.46)
+    assert est["estimate_usd"] == pytest.approx(22.11)
     legs = {e["step"]: e for e in est["legs"]}
-    assert set(legs) == {"smoke", "train", "eval"}
-    assert legs["smoke"]["runs"] == legs["train"]["runs"] == legs["eval"]["runs"] == 2
+    assert set(legs) == {"smoke", "train", "eval", "generate", "ifc"}
+    assert {legs[s]["runs"] for s in legs} == {2}
     assert legs["train"]["connection"] == "gpu" and legs["train"]["hourly_usd"] == 0.66
     assert env.timeline == [], "nothing starts at the launch door"
 
     rec = types.SimpleNamespace(admission=admission, plan=bridge.plan)
     shown = estimate_evidence(rec, "approve-run")
-    assert shown["estimate_usd"] == pytest.approx(20.46)
+    assert shown["estimate_usd"] == pytest.approx(22.11)
     assert "smoke: $0.66/h × 0.5h on gpu × 2 (2 attempts)" in shown["estimate_basis"]
     assert "train: $0.66/h × 12h on gpu × 2 (2 attempts)" in shown["estimate_basis"]
     assert "eval: $0.66/h × 3h on gpu × 2 (2 attempts) = $3.96" in shown["estimate_basis"]
+    assert "generate: $0.66/h × 1h on gpu × 2 (2 attempts) = $1.32" in shown["estimate_basis"]
+    assert "ifc: $0.66/h × 0.25h on gpu × 2 (2 attempts) = $0.33" in shown["estimate_basis"]
     # only the gate before the first priced leg carries it
     assert estimate_evidence(rec, "smoke-ok") == {} and estimate_evidence(rec, "promote-model") == {}
 
 
 async def test_a_box_dearer_than_the_budget_allows_is_refused_before_any_record(env):
-    """$1.50/h × 31 box-hours = $46.50 > $25: refused at the door, nothing started."""
+    """$1.50/h × 33.5 box-hours = $50.25 > $25: refused at the door, nothing started."""
     from cairn.core.admission_door import AdmissionRefusedError
     from cairn.core.connections import SqliteConnectionStore, default_connection_store
     from cairn.core.dispatch.pipeline_launch import launch_pipeline_def
@@ -278,7 +304,7 @@ async def test_a_box_dearer_than_the_budget_allows_is_refused_before_any_record(
     bridge = _Capture()
     with pytest.raises(AdmissionRefusedError) as refused:
         await launch_pipeline_def(_sft(), inputs=_INPUTS, bridge=bridge)
-    assert "estimated at $46.50" in str(refused.value)
+    assert "estimated at $50.25" in str(refused.value)
     assert "the budget has $25.00 of $25.00 left in series 'sft'" in str(refused.value)
     assert not hasattr(bridge, "plan") and env.timeline == []
 
@@ -350,15 +376,17 @@ async def test_the_stub_run_starts_the_box_after_approval_and_stops_it_after_tra
         await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
         assert env.timeline == [], "no box before the approval"
         (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
-        assert card["evidence"]["estimate_usd"] == pytest.approx(20.46)
+        assert card["evidence"]["estimate_usd"] == pytest.approx(22.11)
         assert "train: $0.66/h × 12h on gpu × 2 (2 attempts)" in card["evidence"]["estimate_basis"]
 
         await b.advance_step(pid, "approve-run", approver="ml-owner")
         rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
 
         assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "submit:eval",
-                                "ec2:stop"]
-        assert rec.step_state["eval"].status == "done"
+                                "submit:generate", "ec2:stop"]
+        assert rec.step_state["eval"].status == "done" and rec.step_state["generate"].status == "done"
+        # no `ifc_schema`: the ifc leg is routed off, and the box still stops after `generate`
+        assert (rec.step_state["ifc"].status, rec.step_state["ifc"].verdict) == ("skipped", "routed_off")
         assert env.ec2.tags["cairn:managed"] and env.ec2.tags["cairn:release-after"]
         assert rec.step_state["release-box"].status == "done"
         events = [(s, e) for s, e, _ in audits]
@@ -366,6 +394,31 @@ async def test_the_stub_run_starts_the_box_after_approval_and_stops_it_after_tra
             i for i, (s, _) in enumerate(events) if s == "release-box")
         assert rec.status == "failed" and rec.step_state["release"].status == "done"
         assert env.ec2.state == "stopped"
+    finally:
+        b.stop()
+
+
+async def test_with_an_ifc_schema_the_ifc_leg_runs_on_the_box_before_it_stops(env, monkeypatch):
+    """#41, #12: a launch that names `ifc_schema` runs the `ifc` leg after `generate`, on the same
+    box, reading the samples file the generate leg wrote there; the box stops after it. On the stub
+    tier the answers are placeholders, so the leg is never `checked`."""
+    engine = FakeBoxEngine(env.box, env.timeline, monkeypatch)
+    b, audits = await _bridge(engine, monkeypatch)
+    try:
+        from cairn.core.dispatch.pipeline_launch import launch_pipeline_def
+
+        rec = await launch_pipeline_def(_sft(), inputs={**_INPUTS, "ifc_schema": "IFC4"}, bridge=b)
+        pid = rec.pipeline_id
+        await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
+        await b.advance_step(pid, "approve-run", approver="ml-owner")
+        rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
+
+        assert env.timeline == ["ec2:tags", "ec2:start", "submit:smoke", "submit:train", "submit:eval",
+                                "submit:generate", "submit:ifc", "ec2:stop"]
+        assert rec.step_state["ifc"].status == "done"
+        _, _, ifc = engine.jobs["job-ifc"]
+        assert ifc.stats["eval.ifc_validate.checked"] is False and ifc.stats["eval.ifc_validate.rows"] == 6
+        assert rec.step_state["release-box"].status == "done" and env.ec2.state == "stopped"
     finally:
         b.stop()
 
@@ -433,11 +486,11 @@ async def test_sft_own_box_runs_on_the_stub_with_no_ec2_call(env, monkeypatch):
         pid = rec.pipeline_id
         await _wait(b.store, pid, _status("approve-run", "awaiting_approval"))
         (card,) = [d["gate_context"] for s, e, d in audits if s == "approve-run" and e == "awaiting"]
-        assert card["evidence"]["estimate_usd"] == pytest.approx(20.46)
+        assert card["evidence"]["estimate_usd"] == pytest.approx(22.11)
         await b.advance_step(pid, "approve-run", approver="ml-owner")
         rec = await _wait(b.store, pid, lambda r: r.status in ("done", "failed", "cancelled"))
 
-        assert env.timeline == ["submit:smoke", "submit:train", "submit:eval"], "no EC2 call"
+        assert env.timeline == ["submit:smoke", "submit:train", "submit:eval", "submit:generate"], "no EC2 call"
         assert rec.status == "failed" and rec.step_state["improved"].status != "done"
         assert set(rec.step_state) == {s.id for s in _plan("sft-own-box").steps}
     finally:
