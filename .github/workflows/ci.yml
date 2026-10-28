@@ -58,16 +58,13 @@ jobs:
         for d in $members; do uv build -q "$d" -o dist; done
         ls -l dist
   demo-laptop:
-    # The laptop demo end to end on Apple silicon: install, then prepare -> LoRA -> held-out loss ->
-    # gates -> promote, on a tiny model built offline (no Hub access, no secrets).
-    runs-on: macos-14
+    # The laptop demo end to end: install, then prepare -> LoRA -> held-out loss -> gates -> promote,
+    # on a tiny model built offline (no Hub access, no secrets). On the CPU: the hosted macOS runners
+    # are VMs whose MPS device cannot allocate memory ("MPS backend out of memory" on a 256-byte
+    # allocation, with or without PYTORCH_MPS_HIGH_WATERMARK_RATIO), so the Apple-silicon path is
+    # not testable there; the CPU path is the same pipeline, profile and operators.
+    runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      # The hosted macOS runner is a VM: torch sees an MPS device, but its allocator refuses even a
-      # 256-byte allocation under the default high-watermark ("MPS backend out of memory"). PyTorch's
-      # own switch lifts that limit; the engine's ml legs inherit it. A real Apple-silicon Mac does
-      # not need it.
-      PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.0"
     steps:
     - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
     - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0

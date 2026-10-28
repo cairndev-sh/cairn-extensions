@@ -63,14 +63,15 @@ Press Enter, or run the printed command from another shell. Options:
 
 `LAPTOP_DEMO_PORT`, `LAPTOP_DEMO_S3_PORT`, `LAPTOP_DEMO_WORK` and `LAPTOP_DEMO_TIMEOUT` change the
 ports, the work directory (default: a new temp directory, kept so you can look) and the give-up time.
-When a pipeline fails, the run prints the last `LAPTOP_DEMO_LOG_LINES` (default 60) lines of the
-control plane's `server.log`, where the failed leg's error is.
+When a pipeline fails, the run prints each failed leg's error and the end of its run's event log,
+then the last `LAPTOP_DEMO_LOG_LINES` (default 60) lines of the control plane's `server.log`.
 
-On a macOS virtual machine (a CI runner, for example), torch reports an MPS device that cannot
-allocate memory, and the first ml leg fails with `MPS backend out of memory`. Set
-`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0` before `run.sh` there; a physical Mac does not need it.
 [`env.sh`](env.sh) holds every variable the run sets; `source` it to drive the same server from
 another shell.
+
+On a macOS virtual machine (a hosted CI runner, for example), torch reports an MPS device that
+cannot allocate memory, and the first ml leg fails with `MPS backend out of memory`. Run the demo
+on a physical Mac, or on Linux, where it trains on the CPU.
 
 ## Expected output
 
@@ -130,8 +131,8 @@ more steps (`-i max_steps=100`).
   [`training-needs-approval.yaml`](policies/training-needs-approval.yaml) injects nothing; it is
   there to show the environment's rule, and a test shows it inserts the gate into a pipeline that
   dropped its own.
-- **Only the tiny model is run in CI** (on a macOS runner, unproven until that job first runs); the default SmolLM2 model
-  and Apple-silicon MPS are not exercised by CI.
+- **Only the tiny model is run in CI, on a Linux runner's CPU.** The default SmolLM2 model and
+  Apple-silicon MPS are not exercised by CI: the hosted macOS runners cannot allocate on MPS.
 - **Nothing here is a production setup.** It is a single process on one machine with a throwaway
   store; the adapter stays in the leg's temporary directory.
 
