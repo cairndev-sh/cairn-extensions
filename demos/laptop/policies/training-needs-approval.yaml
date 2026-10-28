@@ -1,0 +1,25 @@
+# policies/training-needs-approval.yaml — training starts only after a person says so.
+#
+# An environment rule, not a pipeline's: the policy decides at plan time that a person approves
+# before any `finetune/sft-train` leg (the smoke run and the full run), whichever pipeline asks for
+# the leg. `finetune/sft-local` already has its own `approve-run` gate in front of both, so here the
+# policy adds nothing and the gate is the pipeline's; the policy is what keeps the rule true for a
+# copy of the pipeline that dropped its gate (an injected gate is inserted before the leg, and the
+# approver sees which policy asked for it).
+#
+# `action_types` is a placeholder that matches no operator: a `require_hitl` policy that names only
+# `pipeline_legs` is also consulted for every operator call at dispatch, and would pause all of them
+# (cairndev 0.3.1). The plan-time rule is the one meant here.
+name: laptop-training-needs-approval
+description: A person approves before any fine-tune leg starts.
+
+applies_to:
+  pipeline_legs:
+    - finetune/sft-train
+  action_types:
+    - plan-time-only
+
+rules:
+  - effect: require_hitl
+    reason: "training uses this machine for minutes to hours; a person approves it first"
+    approval_role: ml-owners

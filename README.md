@@ -18,6 +18,7 @@ The engine, the builtin operator packs and the core contracts live in
 | `packages/cairn-operator-<name>/` | operator packs, one wheel each |
 | `packages/cairn-contracts-<name>/` | the domain contracts those packs implement (data only) |
 | `packs/cairn-pack-<name>/` | domain packs: pipelines, flows, profiles and presets, no code |
+| `demos/` | runnable demos built from the packs; [`demos/laptop`](demos/laptop/README.md): a governed fine-tune on one laptop |
 | `scripts/` | the checks CI runs and the catalog generator |
 | `tests/` | the checks' own tests |
 
@@ -33,7 +34,7 @@ The engine, the builtin operator packs and the core contracts live in
 | Domain pack | What | Stages from |
 |---|---|---|
 | [`cairn-pack-dataset-prep`](packs/cairn-pack-dataset-prep/README.md) | `dataset-prep/prepare`: pin a source, audit it, split it by group and register `train`, `val` and `test` versions with their roles; a person reviews the run when dedup drops a large share of the source | `cairn-operator-dataset-checks` |
-| [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, benchmarks and held-out loss for the base model and the candidate, three approvals and a governed tag, starting its GPU box after approval and stopping it on every outcome; `finetune/eval-adapter`: the same evaluation for an adapter you already have (each with an `-own-box` copy for a box you manage, or one machine); the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training`, `cairn-operator-eval-lm` |
+| [`cairn-pack-finetune`](packs/cairn-pack-finetune/README.md) | `finetune/sft`: LoRA / QLoRA on those versions, with a smoke run, the base model's validation loss as the baseline, benchmarks and held-out loss for the base model and the candidate, three approvals and a governed tag, starting its GPU box after approval and stopping it on every outcome; `finetune/eval-adapter`: the same evaluation for an adapter you already have (each with an `-own-box` copy for a box you manage, or one machine); `finetune/sft-local`: the same on a laptop with no GPU, cloud or API key, with the `finetune-local` profile ([the laptop demo](demos/laptop/README.md)); the `finetune-ssh` profile for a GPU box over SSH | `cairn-operator-training`, `cairn-operator-eval-lm` |
 
 ## Install
 

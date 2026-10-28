@@ -1,0 +1,43 @@
+# profiles/finetune-local.toml — run `finetune/sft-local` on one laptop (the laptop demo,
+# demos/laptop/ in this repository): the control plane, the data leg, the trainer and the
+# evaluation all on the machine that runs the engine. No GPU, no cloud account, no API key.
+#
+# It does not `extends` the core `secure` profile: `extends` is a path relative to this file, and
+# `secure.toml` lives in the cairndev wheel, so a pack cannot name it. It binds what `secure` adds
+# to the default profile, the audit sink and redaction, itself (as `finetune-ssh` does), and
+# nothing else: no `ml_target`, no `remote_exec_mode`.
+#
+#     cairn ls finetune                       # this file's installed path
+#     export CAIRN_PROFILE=<this file>
+#     export CAIRN_ARTIFACT_S3_BUCKET=<bucket>   # the versions dataset-prep registers
+#     export CAIRN_AUDIT_LOG=$PWD/audit.jsonl    # the hash-chained audit log
+#
+#   * Versions and the adapter go through an S3-compatible store even on one machine, because
+#     `dataset-prep/prepare` refuses to register from the local store. The demo runs `moto_server`
+#     for it (`pip install 'moto[server]'`); set CAIRN_ARTIFACT_S3_ENDPOINT on the control plane and
+#     AWS_ENDPOINT_URL for the trainer and the evaluation (they read that name, not the first), plus
+#     dummy AWS credentials. Any S3-compatible store (MinIO) or a real bucket works the same way.
+#   * With no `ml_target` the builtin ml engine runs each ml leg as a local subprocess of the engine.
+#   * Install `cairn-operator-training[local]` and `cairn-operator-eval-lm[box]` in the engine's
+#     environment: the engine is also the box, so it needs torch.
+#   * The audit log: under cairndev 0.3.1 the core writes a refused gate decision, template-path
+#     approvals and licence acceptance, LLM and MCP calls there; a pipeline's gate approvals and
+#     promotion are on the run record instead (cairndev-sh/cairn#233).
+#   * Governance that a person decides (a gate that waits) is not set here: policies are loaded
+#     from CAIRN_POLICIES_DIR (demos/laptop/policies/).
+
+[profile]
+visibility = "public"
+
+[profile.bindings]
+# The hash-chained audit log (the builtin cairn-operator-audit-store that ships with cairndev).
+# CAIRN_AUDIT_LOG sets the file (default `audit.jsonl` in the engine's working directory).
+"audit.sink" = "audit/store"
+# Redaction before anything leaves for an LLM vendor (the builtin cairn-operator-redact-regex).
+# `sft-local` makes no LLM calls; bound so the profile is complete and `cairn doctor --strict` passes.
+"redact.text" = "redact/text"
+
+[profile.backends]
+dataflow_engine = "builtin"   # dataset-prep/prepare's data leg, on this machine
+ml_engine       = "builtin"   # the sft-train and sft-eval flows, on this machine
+artifact_store  = "s3"        # the versions and the adapter cross the legs through S3 (moto locally)

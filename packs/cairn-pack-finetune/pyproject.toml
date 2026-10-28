@@ -10,7 +10,7 @@
 # loads the same directory as a dev pack.
 [project]
 name = "cairn-pack-finetune"
-version = "0.2.1"
+version = "0.3.0"
 description = "cairn domain pack: fine-tune a model with LoRA or QLoRA on prepared train, val and test versions."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,10 +21,10 @@ dependencies = [
     "cairndev>=0.3.1,<0.4",
     # The kernels the flow names (sample.fidelity, train.qlora 1.2.0, eval.checkpoints,
     # package.adapter); the base install carries no training stack.
-    "cairn-operator-training>=0.1,<0.2",
+    "cairn-operator-training>=0.1.1,<0.2",
     # The kernel the `sft-eval` flow names (eval.lm_eval, cairn-extensions#42): the control plane
     # checks a flow's stages against its registry at launch; the box needs the `[box]` extra.
-    "cairn-operator-eval-lm>=0.2,<0.3",
+    "cairn-operator-eval-lm>=0.3,<0.4",
     # compute/acquire and compute/release (cairndev's remote pack) start and stop the `sft` box
     # through boto3 on the control plane; cairndev declares it only in an extra (#26).
     "boto3>=1.34",
