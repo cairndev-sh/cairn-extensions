@@ -109,7 +109,7 @@
     {
       "ref": "cairn-operator-training",
       "kind": "operator_pack",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "trust": "official",
       "description": "One SFT trainer: Unsloth QLoRA/LoRA as flow stages an engine runs on a GPU box, plus the stub and CPU/MPS local trainers.",
       "operators": [

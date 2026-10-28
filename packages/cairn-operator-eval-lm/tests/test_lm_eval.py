@@ -519,4 +519,17 @@ def test_the_harness_extra_is_bounded_to_the_releases_read():
     from pathlib import Path
 
     project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    assert project["project"]["optional-dependencies"]["harness"] == ["lm-eval>=0.4.10,<0.4.14"]
+    assert project["project"]["optional-dependencies"]["harness"] == ["lm-eval[api]>=0.4.10,<0.4.14"]
+
+
+def test_the_harness_extra_brings_the_api_backend():
+    # cairn-extensions#46: `local-completions` (the served-candidate backend) lives behind lm-eval's
+    # [api] extra; without it a real run fails at model construction.
+    import tomllib
+    from pathlib import Path
+
+    from packaging.requirements import Requirement
+
+    project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    (req,) = [Requirement(r) for r in project["project"]["optional-dependencies"]["harness"]]
+    assert req.name == "lm-eval" and "api" in req.extras
