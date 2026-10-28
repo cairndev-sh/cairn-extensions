@@ -66,8 +66,30 @@ class Loaded:
     tokenizer: Any
     quantization: str
     adapter: str = ""
+    device: str = ""   # where the weights live ("cuda:0", "mps", "cpu"); "" = not reported
+    dtype: str = ""    # the load dtype ("float16", "float32"); "" = not reported
     lm: Any = None
     extra: dict = field(default_factory=dict)
+
+
+class Unsupported(RuntimeError):
+    """The machine cannot run what was asked, and the stage says so in these words: raised before
+    any model loads, reported as ``checked=false`` with this message and no ``harness failed:``
+    prefix (cairn-extensions#52)."""
+
+
+def pick_device(torch: Any) -> tuple[str, Any]:
+    """(device kind, dtype) for ``torch``'s probes: CUDA, else MPS, else the CPU.
+
+    CUDA keeps float16 ("a T4 has no bf16", the trainer's rule). Off CUDA the weights are float32,
+    the dtype the trainer's CPU/MPS path trains in (``cairn-operator-training``'s ``local.py``):
+    float16 on the CPU is slow, and on MPS it can overflow where float32 does not."""
+    if torch.cuda.is_available():
+        return "cuda", torch.float16
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps", torch.float32
+    return "cpu", torch.float32
 
 
 class Backend(Protocol):
@@ -124,32 +146,51 @@ class HfBackend:
 
     name = "hf"
 
-    def __init__(self) -> None:
-        import lm_eval  # noqa: F401, PLC0415 — the [box] extra; ImportError tells the stage it is absent
+    def __init__(self, *, harness: bool = True) -> None:
+        # harness=False: the loss-only preset scores split losses with torch, transformers and peft
+        # alone and never imports lm-eval (cairn-extensions#53).
+        self.harness = harness
+        if harness:
+            import lm_eval  # noqa: F401, PLC0415 — the [box] extra; ImportError tells the stage it is absent
         import peft  # noqa: F401, PLC0415
         import torch  # noqa: F401, PLC0415
         import transformers  # noqa: F401, PLC0415
 
     def versions(self) -> dict[str, str]:
-        import lm_eval  # noqa: PLC0415
         import peft  # noqa: PLC0415
         import torch  # noqa: PLC0415
         import transformers  # noqa: PLC0415
 
-        return {"lm_eval": str(getattr(lm_eval, "__version__", "?")), "torch": torch.__version__,
+        if self.harness:
+            import lm_eval  # noqa: PLC0415
+
+            lm_eval_version = str(getattr(lm_eval, "__version__", "?"))
+        else:
+            lm_eval_version = "not used"
+        kind, _ = pick_device(torch)
+        return {"lm_eval": lm_eval_version, "torch": torch.__version__,
                 "transformers": transformers.__version__, "peft": peft.__version__,
-                "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"}
+                "device": torch.cuda.get_device_name(0) if kind == "cuda" else kind}
 
     def load(self, base_model: str, *, quantize_4bit: bool, seed: int) -> Loaded:
         import torch  # noqa: PLC0415
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
+        kind, dtype = pick_device(torch)
+        if quantize_4bit and kind != "cuda":
+            # bitsandbytes' 4-bit kernels need CUDA. Refuse in these words, before anything loads,
+            # instead of a generic ImportError out of the model construction (cairn-extensions#52).
+            raise Unsupported(
+                f"4-bit loading (method: qlora) needs CUDA and bitsandbytes; this machine has no CUDA "
+                f"(it would run on {kind}). Run with method: lora, which loads the base unquantised "
+                "as the CPU/MPS trainer trains it.")
         torch.manual_seed(seed)
         tokenizer = AutoTokenizer.from_pretrained(base_model)
         pre = getattr(AutoConfig.from_pretrained(base_model), "quantization_config", None)
-        # float16, not bfloat16: a T4 (compute capability 7.5) has no bf16, the trainer's rule too
-        kw: dict[str, Any] = {"dtype": torch.float16}
-        if torch.cuda.is_available():
+        # float16 on CUDA, not bfloat16: a T4 (compute capability 7.5) has no bf16, the trainer's
+        # rule too; float32 on MPS and the CPU (pick_device)
+        kw: dict[str, Any] = {"dtype": dtype}
+        if kind == "cuda":
             kw["device_map"] = {"": 0}
         if pre is not None:
             method = pre.get("quant_method", "?") if isinstance(pre, dict) else getattr(pre, "quant_method", "?")
@@ -162,10 +203,13 @@ class HfBackend:
                 bnb_4bit_compute_dtype=torch.float16)
             quantization = "4-bit nf4 on load (double quant, float16 compute)"
         else:
-            quantization = "none (float16)"
+            quantization = f"none ({str(dtype).removeprefix('torch.')})"
         model = AutoModelForCausalLM.from_pretrained(base_model, **kw)
+        if kind == "mps":
+            model = model.to("mps")
         model.eval()
-        return Loaded(model=model, tokenizer=tokenizer, quantization=quantization)
+        return Loaded(model=model, tokenizer=tokenizer, quantization=quantization,
+                      device="cuda:0" if kind == "cuda" else kind, dtype=str(dtype).removeprefix("torch."))
 
     def chat_template(self, loaded: Loaded, adapter: str) -> tuple[str, str]:
         """The template the adapter was trained with: the one its saved tokenizer carries (the
@@ -210,7 +254,7 @@ class HfBackend:
         model = PeftModel.from_pretrained(loaded.model, adapter)
         model.eval()
         return Loaded(model=model, tokenizer=loaded.tokenizer, quantization=loaded.quantization,
-                      adapter=adapter)
+                      adapter=adapter, device=loaded.device, dtype=loaded.dtype)
 
     def evaluate(self, loaded: Loaded, *, task: str, limit: int, num_fewshot: int, batch_size: int,
                  seed: int) -> tuple[dict, Timing]:
@@ -311,9 +355,11 @@ class StubBackend:
         return per_token * tokens, tokens
 
 
-def make_backend(*, stub: bool) -> Backend:
-    """The backend for this run. Raises ImportError when the real one's libraries are absent."""
-    return StubBackend() if stub else HfBackend()
+def make_backend(*, stub: bool, harness: bool = True) -> Backend:
+    """The backend for this run. Raises ImportError when the real one's libraries are absent;
+    ``harness=False`` (a loss-only preset) does not need lm-eval among them."""
+    return StubBackend() if stub else HfBackend(harness=harness)
 
 
-__all__ = ["CHATML", "REQUIRED", "Backend", "HfBackend", "Loaded", "StubBackend", "Timing", "make_backend"]
+__all__ = ["CHATML", "REQUIRED", "Backend", "HfBackend", "Loaded", "StubBackend", "Timing", "Unsupported",
+           "make_backend", "pick_device"]

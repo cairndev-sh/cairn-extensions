@@ -10,7 +10,7 @@
 # loads the same directory as a dev pack.
 [project]
 name = "cairn-pack-finetune"
-version = "0.2.0"
+version = "0.2.1"
 description = "cairn domain pack: fine-tune a model with LoRA or QLoRA on prepared train, val and test versions."
 readme = "README.md"
 requires-python = ">=3.12"

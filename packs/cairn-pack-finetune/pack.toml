@@ -12,7 +12,7 @@
 
 [pack]
 name        = "finetune"
-version     = "0.2.0"
+version     = "0.2.1"
 description = "Fine-tune a model with LoRA or QLoRA on prepared train, val and test versions, gated on the base model's validation loss and a person, with benchmarks and held-out loss for base and candidate; or evaluate an adapter you already have."
 tags = [
     "domain:modelops",

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-eval-lm"
-version = "0.2.1"
+version = "0.3.0"
 description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, and the eval.lm_eval flow stage that scores a base model and its adapter on the GPU box; task presets as pack data."
 readme = "README.md"
 license = "Apache-2.0"

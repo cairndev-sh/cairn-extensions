@@ -23,7 +23,13 @@ minutes), `reasoning`, `knowledge`, and for the stage `forgetting` (ARC-Easy, AR
 HellaSwag, WinoGrande and PIQA at 500 documents each, MMLU at 10 per subject; the stage's default)
 and `forgetting-ifeval` (plus IFEval, all 541 prompts). A preset can size a task on its own
 (`[limits]`): lm-eval applies a limit per subtask, so `mmlu = 10` is 570 questions. Adding a preset
-is a data edit.
+is a data edit. `heldout-loss` has no benchmark task at all (`loss_only = true`): the stage scores
+only the held-out val and test loss of the base model and the candidate, imports no lm-eval, and
+needs no route to the Hugging Face Hub for datasets, which makes it the preset for an offline box or
+a CPU / Apple Silicon machine. With any other preset, a benchmark that fails as a measurement (a task
+that will not load, a harness error) no longer takes the split losses with it: the record is
+`checked=false` for the benchmarks with the reason, and `split_loss_checked=true` with the four
+losses.
 
 `lm-eval` is optional and imported lazily: the `[harness]` extra for the operator, the `[box]`
 extra for the stage. Without it the operator no-ops with `checked=false` and a note, and the stage
@@ -52,6 +58,13 @@ pip install 'cairn-operator-training[gpu]' 'cairn-operator-eval-lm[box]'
 The two resolve together (checked by hand with `uv pip compile` for Linux x86-64 and Python 3.12:
 lm-eval 0.4.13 with the trainer's torch 2.11.0, transformers 5.5.0, peft 0.20.0, datasets 4.3.0);
 CI does not check that resolution yet.
+
+**Off CUDA.** The stage puts the model on CUDA (float16) when there is one, else on MPS (Apple
+Silicon), else on the CPU; off CUDA the weights are float32, the dtype the trainer's CPU/MPS path
+trains in. `device`, `dtype` and `quantization` are on the record. `method: qlora` needs CUDA and
+bitsandbytes: without CUDA the stage reports `checked=false` before any model loads, saying so and
+naming `method: lora` (the plain-LoRA, unquantised evaluation of what the CPU/MPS trainer trained).
+On such a machine the benchmark presets are hours of compute; `heldout-loss` is what fits.
 
 | Extra | What it is for |
 |---|---|

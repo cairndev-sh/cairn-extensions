@@ -15,7 +15,7 @@
 
 [pack]
 name        = "cairn-operator-eval-lm"
-version     = "0.2.1"
+version     = "0.3.0"
 type        = "operator"
 description = "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box; presets as pack data."
 kind        = "operator"

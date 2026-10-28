@@ -7,7 +7,7 @@ a data edit reviewed like a config change, not a code change — the property th
 made lm-evaluation-harness the pick (its tasks are YAML too).
 
 Adding a preset: drop ``<name>.toml`` in this directory. It is discovered, and
-:func:`load` validates it — an unreadable or task-less preset fails at load with
+:func:`load` validates it — an unreadable or task-less (and not `loss_only`) preset fails at load with
 the file named, never at the harness call ten minutes into a GPU job.
 """
 from __future__ import annotations
@@ -30,6 +30,12 @@ class TaskPreset(BaseModel):
     name: str
     description: str = ""
     tasks: list[str] = Field(default_factory=list)
+    loss_only: bool = Field(
+        False, description="A preset with no benchmark tasks that scores only the held-out split "
+                           "losses (cairn-extensions#53). The on-box `eval.lm_eval` stage runs it "
+                           "without importing lm-eval; the served-candidate operator has nothing "
+                           "to run for it. Required to leave `tasks` empty, so an accidentally "
+                           "empty preset is still refused.")
     num_fewshot: int = 0
     limit: int = Field(0, ge=0, description="Documents per task; 0 = the whole task (expensive).")
     batch_size: int = Field(8, gt=0)
@@ -73,8 +79,11 @@ def load(name: str) -> TaskPreset:
     with path.open("rb") as fh:
         data = tomllib.load(fh)
     preset = TaskPreset.model_validate({"name": name, **data})
-    if not preset.tasks:
-        raise ValueError(f"task preset {name!r} ({path}) names no tasks")
+    if preset.loss_only and preset.tasks:
+        raise ValueError(f"task preset {name!r} ({path}) is loss_only but names tasks {preset.tasks!r}")
+    if not preset.tasks and not preset.loss_only:
+        raise ValueError(f"task preset {name!r} ({path}) names no tasks (a preset that scores only "
+                         "the held-out loss says so with `loss_only = true`)")
     return preset
 
 
