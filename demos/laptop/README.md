@@ -65,6 +65,10 @@ Press Enter, or run the printed command from another shell. Options:
 ports, the work directory (default: a new temp directory, kept so you can look) and the give-up time.
 When a pipeline fails, the run prints the last `LAPTOP_DEMO_LOG_LINES` (default 60) lines of the
 control plane's `server.log`, where the failed leg's error is.
+
+On a macOS virtual machine (a CI runner, for example), torch reports an MPS device that cannot
+allocate memory, and the first ml leg fails with `MPS backend out of memory`. Set
+`PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0` before `run.sh` there; a physical Mac does not need it.
 [`env.sh`](env.sh) holds every variable the run sets; `source` it to drive the same server from
 another shell.
 
