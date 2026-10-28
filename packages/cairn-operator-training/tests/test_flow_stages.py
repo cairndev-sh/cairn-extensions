@@ -308,3 +308,49 @@ def test_flow_path_publish_failure_FAILS_the_stage(tmp_path, monkeypatch):
     with pytest.raises(AdapterPublishError):
         fs.train_qlora(wd, {"output_name": "m", "dataset_uri": "hf://d",
                             "artifact_target": "s3"}, [])
+
+
+# ── #51 — a file:// adapter (the CPU/MPS trainer's shape) is hashed like a bare path ──
+
+def _package_with(tmp_path, adapter, uri, local_uri):
+    wd = tmp_path / f"wd-{abs(hash((uri, local_uri)))}"
+    wd.mkdir()
+    (wd / "train_result.json").write_text(json.dumps({
+        "status": "succeeded", "backend": "local",
+        "adapter_uri": uri, "local_adapter_dir": local_uri, "metrics": {}}))
+    return package_adapter(wd, {}, [])
+
+
+@pytest.mark.parametrize("which", ["both", "local_dir_only", "adapter_uri_only"])
+def test_package_adapter_hashes_a_file_uri_like_the_bare_path(tmp_path, which):
+    adapter = _adapter_on_disk(tmp_path).resolve()
+    bare = _package_with(tmp_path, adapter, str(adapter), str(adapter))
+    furi = f"file://{adapter}"
+    uri, local = {"both": (furi, furi), "local_dir_only": (str(adapter), furi),
+                  "adapter_uri_only": (furi, "")}[which]
+    stats = _package_with(tmp_path, adapter, uri, local)
+    assert stats["candidate_hashed"] is True and stats["kind"] == "model"
+    assert stats["content_hash"] == bare["content_hash"] and stats["bytes"] == bare["bytes"]
+    assert len(stats["spec_digest"]) == 64 and stats["spec_digest"] == bare["spec_digest"]
+
+
+def test_train_qlora_with_the_cpu_result_shape_leaves_a_hashable_local_dir(tmp_path, monkeypatch):
+    from operator_training import flow_stages as fs
+
+    adapter = _adapter_on_disk(tmp_path).resolve()
+
+    class _Op:
+        async def run(self, spec, ctx):
+            from operator_training.schemas.train import TrainResult
+            return TrainResult(status="succeeded", backend="local",
+                               adapter_uri=f"file://{adapter}", metrics={"train_loss": 0.1})
+
+    monkeypatch.setattr("operator_training.operators.local.LocalTrainOp", _Op)
+    monkeypatch.setattr(fs, "_available_ram_bytes", lambda: 256 * 2**30)
+    monkeypatch.setattr(fs, "publish_adapter_dir", lambda *a, **kw: "")   # nothing published
+    wd = tmp_path / "wd"; wd.mkdir()
+    stats = fs.train_qlora(wd, {"output_name": "m", "dataset_uri": "hf://d"}, [])
+    assert stats["local_adapter_dir"] == str(adapter)      # a directory, not a file:// string
+    pkg = fs.package_adapter(wd, {}, [])
+    assert pkg["candidate_hashed"] is True and pkg["kind"] == "model"
+    assert len(pkg["content_hash"]) == 64 and len(pkg["spec_digest"]) == 64
