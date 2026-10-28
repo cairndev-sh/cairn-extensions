@@ -110,7 +110,11 @@ drive() {
     if [ "$progress" != "$last" ]; then printf '    %s\n' "$progress"; last="$progress"; fi
     case "$status" in
       done) return 0 ;;
-      failed|cancelled) die "pipeline $pid $status${failed:+ at: $failed} (legs' logs: $LAPTOP_DEMO_WORK/server.log)" ;;
+      failed|cancelled)
+        # the leg's own error is in the control plane's log: show its end, so a failure says why
+        printf '\n  the last lines of %s:\n' "$LAPTOP_DEMO_WORK/server.log" >&2
+        tail -n "${LAPTOP_DEMO_LOG_LINES:-60}" "$LAPTOP_DEMO_WORK/server.log" | sed 's/^/    | /' >&2
+        die "pipeline $pid $status${failed:+ at: $failed} (legs' logs: $LAPTOP_DEMO_WORK/server.log)" ;;
     esac
     if [ -n "$gates" ]; then
       for g in $gates; do

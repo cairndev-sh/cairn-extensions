@@ -71,3 +71,5 @@ jobs:
       run: demos/laptop/install.sh
     - name: Run it (answering the human gates as dev)
       run: demos/laptop/run.sh --tiny --auto-approve
+      env:
+        LAPTOP_DEMO_LOG_LINES: "300"

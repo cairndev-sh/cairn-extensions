@@ -63,6 +63,8 @@ Press Enter, or run the printed command from another shell. Options:
 
 `LAPTOP_DEMO_PORT`, `LAPTOP_DEMO_S3_PORT`, `LAPTOP_DEMO_WORK` and `LAPTOP_DEMO_TIMEOUT` change the
 ports, the work directory (default: a new temp directory, kept so you can look) and the give-up time.
+When a pipeline fails, the run prints the last `LAPTOP_DEMO_LOG_LINES` (default 60) lines of the
+control plane's `server.log`, where the failed leg's error is.
 [`env.sh`](env.sh) holds every variable the run sets; `source` it to drive the same server from
 another shell.
 
