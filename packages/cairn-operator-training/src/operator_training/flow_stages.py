@@ -28,6 +28,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from operator_training import dataset_fetch, live
 from operator_training.publish import adapter_files, publish_adapter_dir
@@ -278,7 +279,7 @@ def train_qlora(workdir: Path, config: dict, inputs: list[str]) -> dict:
     # the canonical adapter_uri, and a publish failure is FATAL: continuing would
     # hand `package.adapter` — and then promotion — a path that is about to
     # vanish. The local dir stays on the record as local_adapter_dir for debugging.
-    local_dir = res.adapter_uri or ""
+    local_dir = _local_path(res.adapter_uri or "")
     pure_stub = _stub_selected(config) and not (getattr(spec, "extra", None) or {}).get("mock_adapter_uri")
     if pure_stub and not Path(local_dir).is_dir():
         # #2189 (T04) — the stub tier leaves DETERMINISTIC adapter bytes behind
@@ -424,6 +425,12 @@ def hash_candidate_dir(path: Path) -> "tuple[str, int] | None":
     return h.hexdigest(), total
 
 
+def _local_path(uri: str) -> str:
+    """A ``file://`` adapter location as the bare path the local readers expect (#51);
+    anything else is returned unchanged."""
+    return unquote(urlparse(uri).path) if uri.startswith("file://") else uri
+
+
 def package_adapter(workdir: Path, config: dict, inputs: list[str]) -> dict:
     """Package the accepted candidate: a ``candidate.json`` manifest naming the
     adapter URI + provenance, and — #2189 (T04, C6) — the candidate's CONTENT
@@ -436,10 +443,15 @@ def package_adapter(workdir: Path, config: dict, inputs: list[str]) -> dict:
     adapter_uri = result.get("adapter_uri") or ""
     if not adapter_uri:
         raise RuntimeError("package.adapter: no adapter_uri in train_result.json")
-    local_dir = str(result.get("local_adapter_dir") or "")
+    local_dir = _local_path(str(result.get("local_adapter_dir") or ""))
     hashed = hash_candidate_dir(Path(local_dir)) if local_dir else None
-    if hashed is None and adapter_uri.startswith("/"):
-        hashed = hash_candidate_dir(Path(adapter_uri))
+    if hashed is None:
+        # the CPU/MPS trainer reports file://<dir>; the CUDA path a bare path
+        bare = _local_path(adapter_uri)
+        if bare.startswith("/"):
+            hashed = hash_candidate_dir(Path(bare))
+        if hashed is not None and not local_dir:
+            local_dir = bare
     cfg = Path(local_dir) / "adapter_config.json" if local_dir else None
     spec_digest = hashlib.sha256(cfg.read_bytes()).hexdigest() if cfg is not None and cfg.is_file() else ""
     base_model = (result.get("metrics") or {}).get("base_model") or config.get("base_model", "")
