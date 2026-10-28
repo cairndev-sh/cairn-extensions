@@ -16,6 +16,7 @@ from [`cairn-operator-eval-lm`](../../packages/cairn-operator-eval-lm).
 |---|---|---|
 | An EC2 instance that cairn starts after approval and stops when it is done (a `compute.ssh` connection with `instance_id`, `region` and `hourly_usd`) | `finetune/sft` | `finetune/eval-adapter` |
 | An SSH box you start and stop yourself (any provider), or one machine | `finetune/sft-own-box` | `finetune/eval-adapter-own-box` |
+| Your laptop: no GPU, no cloud, no API key (CPU, or Apple-silicon MPS) | `finetune/sft-local` ([the laptop demo](#on-a-laptop-sft-local)) | |
 
 `sft-own-box` is `sft` without its three box steps (`acquire`, `release-box` and the `release`
 finalizer) and without the `compute_connection` input; its gates, legs, timeouts, retries, budget
@@ -25,6 +26,37 @@ job or the box yourself. Both price their ml legs on a connection with `hourly_u
 show the estimate on `approve-run`. The rest of this README describes `sft`; for `sft-own-box`
 skip the box steps and `compute_connection`, and launch `finetune/sft-own-box`.
 `eval-adapter-own-box` is `eval-adapter` without its box steps in the same way (section 9).
+
+## On a laptop: `sft-local`
+
+`finetune/sft-local` is `sft-own-box` with laptop defaults, and the `finetune-local` profile runs
+it, and `dataset-prep/prepare`, on the machine that runs the engine: no GPU, no cloud account, no
+API key. A test pins the file to `sft-own-box.yaml` key for key except the defaults below.
+
+| Input | `sft-own-box` | `sft-local` | Why |
+|---|---|---|---|
+| `base_model` | `Qwen/Qwen3-4B-Base` | `HuggingFaceTB/SmolLM2-135M` (or a local model directory) | trains in minutes on a CPU |
+| `method` | `qlora` | `lora` | QLoRA is 4-bit on CUDA; the eval leg refuses it without CUDA |
+| `eval_preset` | `forgetting` | `heldout-loss` | only the held-out val and test loss: no benchmark, so no benchmark datasets to download |
+| `max_steps`, `smoke_steps`, `smoke_rows` | 0 (the epochs), 5, 64 | 30, 2, 16 | |
+| `max_seq_len`, `lora_r`, `lora_alpha`, batch 2 x 8, `gradient_checkpointing` | 2048, 16, 32, trainer default, on | 256, 8, 16, 4 x 1, off | |
+| timeouts `smoke` / `train` / `eval` | 30m / 12h / 3h | 15m / 90m / 30m | |
+| `governance.budget` | 25 USD, sized to a priced box | 5 USD, author-declared | see below |
+
+The profile (`profiles/finetune-local.toml`) selects the builtin engines with no `ml_target`, the
+s3 artifact store (dataset-prep refuses to register versions anywhere else, so even one machine
+needs an S3-compatible store: the demo runs `moto_server`), and binds the audit sink and
+redaction. It does not `extends` the core `secure` profile: `extends` is a path relative to the
+profile file, which a pack cannot make into the cairndev wheel. The engine is also the box, so
+install `cairn-operator-training[local]` and `cairn-operator-eval-lm[box]` next to it.
+
+Two limits to know. A laptop leg is **unpriced**: pricing needs a `compute.ssh` connection with
+`hourly_usd`, so the launch door estimates $0 and the pipeline's `governance.budget` is only what
+its author declared, not a measured limit (cairndev-sh/cairn#250, #251). And cairn does not stop a
+trainer that is already running when a pipeline is cancelled: stop the process yourself.
+
+[`demos/laptop/`](../../demos/laptop) in this repository is the whole thing as a script: install,
+then `run.sh`.
 
 ## The `sft` pipeline
 
@@ -116,7 +148,7 @@ Two machines: the **control plane** (the engine, the data leg, the gates and eve
 torch) and a **GPU box** reached over SSH, which runs only the trainer. Every command below is
 the `cairn` CLI; `<pl_id>` is a pipeline id (`pl_…`), `<run_id>` one leg's run.
 
-**Which cairndev.** This pack (0.2.0) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
+**Which cairndev.** This pack (0.3.0) requires `cairndev>=0.3.1,<0.4`: 0.3.1 ships
 `compute/acquire` and `compute/release`, prices a leg on a box with `hourly_usd`, and cancels the
 job on the box before a cancelled pipeline's release stops it. CI proves it on the newest release
 in that range.
@@ -368,7 +400,9 @@ records the run; the box installs `cairn-operator-training[gpu,track-mlflow]` an
 URI. **On one machine:** use `finetune/sft-own-box` (`sft` needs an EC2 instance to start and
 stop) with the default profile and no ssh settings; dataset-prep still registers its versions
 through the s3 store. The default profile binds no audit sink: bind `"audit.sink" = "audit/store"`
-in your own profile, or use the core `secure` profile, to keep the audit log.
+in your own profile, or use the core `secure` profile, to keep the audit log. **On a laptop with
+no GPU:** `finetune/sft-local` and the `finetune-local` profile (above), which binds the audit
+sink already.
 
 ## Presets and profiles
 
@@ -378,6 +412,7 @@ in your own profile, or use the core `secure` profile, to keep the audit log.
 | `presets/ifc-bim-qwen3-4b-own-box.yaml` | the same preset, `ifc-bim-qwen3-4b`, for `sft-own-box` (a preset file names one pipeline; a test keeps the two equal) |
 | `presets/ifc-bim-qwen3-4b-eval-adapter.yaml` | for `eval-adapter`, also named `ifc-bim-qwen3-4b`: the published adapter `hf://cairndev/qwen3-4b-ifc-bim-qlora` on the 4-bit base it was trained on (`unsloth/qwen3-4b-base-unsloth-bnb-4bit`), `forgetting-ifeval`, and the loss on `ifc-bim-alpaca-{val,test}@latest` |
 | `presets/ifc-bim-qwen3-4b-eval-adapter-own-box.yaml` | the same preset for `eval-adapter-own-box` |
+| `profiles/finetune-local.toml` | every leg on the machine that runs the engine (`ml_engine = "builtin"`, no `ml_target`), the s3 artifact store, the audit sink and redaction; for `sft-local` and `dataset-prep/prepare` |
 | `profiles/finetune-ssh.toml` | ml legs on the `gpu` ssh connection (`ml_engine = "builtin"`, `ml_target = "gpu"`, venv mode), the s3 artifact store; for both pipelines (with `sft-own-box` the connection needs no `instance_id`) |
 
 ## Support
@@ -391,6 +426,9 @@ in your own profile, or use the core `secure` profile, to keep the audit log.
 | the box started and stopped by `sft`: `acquire` after `approve-run`, `release-box` after `train`, the finalizer `release`; a cancel cancels the job on the box first | EXPERIMENTAL | `tests/test_sft_box.py`: the plan; the pipeline through the core's launch door and in-process bridge on the stub trainer, with a fake EC2 client (the core's `CAIRN_EC2_CLIENT_FACTORY` seam): the box starts only after the approval and stops right after `train`; a cancel mid-`train` cancels the job before the box stops; a failed `train` still stops the box | 0.3.1 with a fake EC2 only (a local run and CI). A real start and stop on a public release is not proven yet: cairn-extensions#9 |
 | the GPU estimate at launch and on `approve-run` | EXPERIMENTAL | `tests/test_sft_box.py`: the core's launch door prices `smoke` and `train` on a `gpu` connection at $0.66/h ($16.50, two attempts each), `approve-run`'s evidence carries it and no later gate's does, and a $1.50/h box is refused against the $25 budget before any record | 0.3.1 (a local run and CI) |
 | `sft-own-box`: `sft` without the box steps | EXPERIMENTAL | `tests/test_sft_box.py`: the file is pinned to `sft.yaml` key for key except the box steps and `compute_connection`; its plan has the same legs and gates and no compute step; the same stub run on the core's launch door and bridge makes no EC2 call and shows the estimate on `approve-run` | 0.3.1 (a local run and CI) |
+| `sft-local`: `sft-own-box` with laptop defaults | EXPERIMENTAL | `tests/test_sft_local.py`: the file is pinned to `sft-own-box.yaml` key for key except the documented defaults; its plan has the same legs and gates and no compute step; the eval leg runs `heldout-loss` and its time budget is its timeout; the stub run on the core's launch door and bridge | 0.3.1 (a local run and CI) |
+| the `finetune-local` profile | EXPERIMENTAL | `tests/test_sft_local.py`: the core resolves every leg to the local builtin engine, the s3 store, the audit and redaction bindings, no `ml_target`; the launch door prices nothing | 0.3.1 (a local run and CI) |
+| the laptop demo: prepare, then `sft-local` with a real LoRA trainer, `heldout-loss`, approvals and promote | EXPERIMENTAL | `demos/laptop/run.sh --auto-approve`, with a 0.1M-parameter model built offline (`--tiny`): reaches `promote` done on Linux CPU (about 2m45s in all, both pipelines `done`, tag set); `tests/test_demo_laptop.py` pins the two policies. The default model (SmolLM2-135M from the Hub) and Apple-silicon MPS are not run in CI | 0.3.1 (a local run) |
 | `sft` on an ssh GPU box with QLoRA | not yet | the qualification run, cairn-extensions#9 | not yet |
 | `sft`'s `eval` leg: after `train`, priced (3 h × 2), the box stopped after it, the evaluation on the `promote-model` card | EXPERIMENTAL | `tests/test_sft_box.py`, `tests/test_sft.py`: the plan, the estimate ($20.46), the lease (32 h) and the budget; the `sft-eval` flow on the core runner with the stub tier and pinned versions, every `eval.*` figure the card shows present; the stub run on the core's launch door and bridge (the box stops after `eval`); a failed `eval` still stops the box | 0.3.1 (a local run and CI), stub tier only |
 | `finetune/eval-adapter` and its own-box copy | EXPERIMENTAL | `tests/test_eval_adapter.py`: the plan, the 6 h leg and its time budget, the lease and the budget ($7.92); the tag refusal; the own-box copy and the presets pinned; on the core's launch door and bridge with a fake EC2: the estimate on `approve-run`, the box stopped after `eval`, the stub stopped at `evaluated`, a measured (faked) evaluation passing it | 0.3.1 (a local run and CI), faked backend |
