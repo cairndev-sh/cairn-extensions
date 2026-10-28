@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-eval-lm"
-version = "0.2.0"
+version = "0.2.1"
 description = "eval/lm-eval: EleutherAI lm-evaluation-harness against a served candidate, and the eval.lm_eval flow stage that scores a base model and its adapter on the GPU box; task presets as pack data."
 readme = "README.md"
 license = "Apache-2.0"
@@ -33,7 +33,9 @@ Issues = "https://github.com/cairndev-sh/cairn-extensions/issues"
 # Bounded to the releases the seam was read against (harness.py): 0.4.10-0.4.13
 # take an explicit request header, so the endpoint key never comes from the
 # process environment; the seam also checks that at run time and refuses otherwise.
-harness = ["lm-eval>=0.4.10,<0.4.14"]
+# [api]: the served-candidate `local-completions` backend needs aiohttp, tenacity and tiktoken
+# (cairn-extensions#46); without them model construction fails and the run reports checked=false.
+harness = ["lm-eval[api]>=0.4.10,<0.4.14"]
 # box — the `eval.lm_eval` flow stage on the GPU box (cairn-extensions#42): lm-eval's `hf` backend
 # (transformers, torch, accelerate, peft) and the IFEval task's checkers, in the same bounded range
 # as [harness]; boto3 for s3:// splits, an s3:// adapter and the results upload. Install it NEXT TO

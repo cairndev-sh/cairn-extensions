@@ -67,7 +67,7 @@
     {
       "ref": "cairn-operator-eval-lm",
       "kind": "operator_pack",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "trust": "official",
       "description": "eval/lm-eval: lm-evaluation-harness against a served candidate; the eval.lm_eval stage scores a base model and its adapter on the GPU box; presets as pack data.",
       "operators": [
