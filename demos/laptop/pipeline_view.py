@@ -6,6 +6,7 @@
     pipeline_view.py versions <pipeline-id>   # train=… val=… test=… from a dataset-prep run
     pipeline_view.py summary  <pipeline-id>   # the result of an sft-local run
     pipeline_view.py trail    <pipeline-id>   # who decided each human gate, and when
+    pipeline_view.py why      <pipeline-id>   # each failed step's error and the end of its run's log
 
 Stdlib only; it shells out to `cairn remote …` (the same calls you can make by hand) and prints.
 """
@@ -119,8 +120,30 @@ def trail(pid: str) -> None:
             print(f"  {pid}  {step:<14} approved by {st['approver']:<6} asked {waited}  decided {decided}")
 
 
+def why(pid: str, lines: str = "60") -> None:
+    steps = _pipeline(pid).get("step_state") or {}
+    for step, st in steps.items():
+        if st.get("status") not in ("failed", "error", "timed_out"):
+            continue
+        run_id = st.get("run_id")
+        print(f"  step {step}: {st.get('status')}{'  run ' + run_id if run_id else ''}")
+        if st.get("error"):
+            print(f"    error: {st['error']}")
+        if not run_id:
+            continue
+        try:
+            run = _cairn("status", run_id)
+            if run.get("error"):
+                print(f"    run error: {run['error']}")
+        except (subprocess.CalledProcessError, ValueError):
+            pass
+        log = subprocess.run(["cairn", "remote", "logs", run_id], capture_output=True, text=True).stdout
+        for line in log.splitlines()[-int(lines):]:
+            print(f"    | {line}")
+
+
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:] or ["--help"]
-    if cmd not in {"state", "card", "versions", "summary", "trail"}:
+    if cmd not in {"state", "card", "versions", "summary", "trail", "why"}:
         sys.exit(__doc__)
-    {"state": state, "card": card, "versions": versions, "summary": summary, "trail": trail}[cmd](*args)
+    {"state": state, "card": card, "versions": versions, "summary": summary, "trail": trail, "why": why}[cmd](*args)
