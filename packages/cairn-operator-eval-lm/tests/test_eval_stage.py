@@ -381,7 +381,8 @@ def test_an_unresolved_dataset_ref_fails_the_leg(tmp_path):
 # ── not evaluated, never a score ──────────────────────────────────────────────────────────────
 
 def _no_scores(out: dict) -> bool:
-    return not any(k.startswith(("base_", "candidate_", "delta_")) and k != "base_model" for k in out)
+    return not any(k.startswith(("base_", "candidate_", "delta_")) and k != "base_model"
+                   and not k.endswith("_loss") for k in out)
 
 
 def test_no_harness_on_the_box_is_not_evaluated_not_a_failure(tmp_path, clock, monkeypatch):
@@ -397,8 +398,10 @@ def test_no_harness_on_the_box_is_not_evaluated_not_a_failure(tmp_path, clock, m
 def test_a_harness_failure_mid_run_reports_no_scores(tmp_path, clock, monkeypatch):
     _use(monkeypatch, FakeBackend(clock, fail_on="candidate:mmlu"))
     out = _run(tmp_path)
-    assert out["checked"] is False and out["note"] == "harness failed: RuntimeError: CUDA out of memory"
-    assert _no_scores(out) and "output" not in out
+    # the benchmark part failed as a measurement; the held-out loss is still reported (#53)
+    assert out["checked"] is False and out["note"].startswith("harness failed: RuntimeError: CUDA out of memory")
+    assert out["split_loss_checked"] is True and out["benchmarks_checked"] is False
+    assert _no_scores(out) and "output" in out
     assert all(isinstance(v, (str, int, float, bool)) for v in out.values())
 
 
@@ -495,3 +498,204 @@ def test_the_refusal_headline_survives_the_log_tail(tmp_path, clock, monkeypatch
         _run(tmp_path)
     tail = str(refused.value)[-500:]
     assert "refused before the full run" in tail and "> 2.70 h" in tail
+
+
+# ── cairn-extensions#53: the held-out loss on its own, and when a benchmark fails ─────────────────
+
+LOSS_KEYS = ("base_val_loss", "candidate_val_loss", "base_test_loss", "candidate_test_loss",
+             "val_tokens", "test_tokens")
+
+
+def test_the_heldout_loss_preset_has_no_tasks_and_an_accidentally_empty_preset_is_still_refused(tmp_path, monkeypatch):
+    p = presets.load("heldout-loss")
+    assert p.loss_only and p.tasks == [] and "heldout-loss" in presets.available()
+    empty = tmp_path / "empty.toml"
+    empty.write_text('description = "oops"\ntasks = []\n')
+    monkeypatch.setattr(presets, "preset_path", lambda name: empty)
+    with pytest.raises(ValueError, match="names no tasks.*loss_only"):
+        presets.load("empty")
+    empty.write_text('loss_only = true\ntasks = ["arc_easy"]\n')
+    with pytest.raises(ValueError, match="loss_only but names tasks"):
+        presets.load("empty")
+
+
+def test_the_heldout_loss_preset_scores_only_the_split_losses_and_needs_no_harness(tmp_path, clock, monkeypatch):
+    fake = FakeBackend(clock)
+    asked: list[dict] = []
+    monkeypatch.setattr(inprocess, "make_backend", lambda *, stub, **kw: asked.append(kw) or fake)
+    out = _run(tmp_path, preset="heldout-loss", method="lora")
+    assert asked == [{"harness": False}]                       # lm-eval is not asked for
+    assert fake.calls == []                                    # no benchmark task ran, probe or full
+    assert out["checked"] is True and out["split_loss_checked"] is True and out["benchmarks_checked"] is False
+    assert out["base_val_loss"] == pytest.approx(1.5) and out["candidate_test_loss"] == pytest.approx(0.25)
+    assert out["metrics_compared"] == 0 and out["tasks"] == "" and out["note"] == ""
+    assert {c[0] for c in fake.loss_calls} == {"base", "candidate"}
+    report = json.loads(Path(out["output"]).read_text())
+    assert report["scores"] == [] and report["split_loss"]["method"] == flow_stages.SPLIT_LOSS_METHOD
+
+
+def test_the_heldout_loss_preset_without_split_rows_is_not_checked(tmp_path, clock, monkeypatch):
+    monkeypatch.setattr(inprocess, "make_backend", lambda *, stub, **kw: FakeBackend(clock))
+    out = _run(tmp_path, preset="heldout-loss", method="lora", val_uri="", test_uri="")
+    assert out["checked"] is False and out["split_loss_checked"] is False and "no held-out split rows" in out["note"]
+
+
+@pytest.mark.parametrize("fail_on", ["base:arc_easy", "candidate:mmlu"], ids=["in the probe", "in the full pass"])
+def test_a_task_that_fails_still_leaves_the_split_losses(tmp_path, clock, monkeypatch, fail_on):
+    fake = FakeBackend(clock, fail_on=fail_on)
+    _use(monkeypatch, fake)
+    out = _run(tmp_path)
+    assert out["checked"] is False and out["benchmarks_checked"] is False and out["split_loss_checked"] is True
+    assert out["note"].startswith("harness failed: RuntimeError: CUDA out of memory")
+    assert "held-out split losses were still measured" in out["note"]
+    for key in LOSS_KEYS:
+        assert key in out, key
+    assert out["base_val_loss"] == pytest.approx(1.5) and out["candidate_val_loss"] == pytest.approx(0.25)
+    assert out["metrics_compared"] == 0
+    assert not any(k.startswith("n_") for k in out)            # no benchmark figure survives half-scored
+    report = json.loads(Path(out["output"]).read_text())
+    assert report["scores"] == [] and report["split_loss"]["val"]["base"] == pytest.approx(1.5)
+
+
+def test_a_failing_task_with_no_split_rows_is_not_checked_as_before(tmp_path, clock, monkeypatch):
+    _use(monkeypatch, FakeBackend(clock, fail_on="base:arc_easy"))
+    out = _run(tmp_path, val_uri="", test_uri="")
+    assert out["checked"] is False and out["note"] == "harness failed: RuntimeError: CUDA out of memory"
+    assert "output" not in out and "split_loss_checked" not in out
+
+
+def test_the_budget_refusal_still_fails_the_leg_when_benchmarks_are_fine(tmp_path, clock, monkeypatch):
+    _use(monkeypatch, FakeBackend(clock, per_batch_s=60.0))
+    with pytest.raises(flow_stages.TimeBudgetExceeded):
+        _run(tmp_path, time_budget_s=3600)
+
+
+# ── cairn-extensions#52: device and dtype off CUDA, and qlora without CUDA ────────────────────────
+
+class _Torch:
+    """The torch probes and dtypes the loader reads, faked."""
+
+    float16, float32 = "torch.float16", "torch.float32"
+    __version__ = "fake"
+
+    def __init__(self, *, cuda: bool = False, mps: bool = False) -> None:
+        from types import SimpleNamespace
+
+        self.cuda = SimpleNamespace(is_available=lambda: cuda, get_device_name=lambda i: "Tesla T4")
+        self.backends = SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps))
+        self.seeded: list[int] = []
+
+    def manual_seed(self, seed: int) -> None:
+        self.seeded.append(seed)
+
+
+def _loader(monkeypatch, torch: _Torch, *, pre_quantized: bool = False):
+    """Fake torch + transformers in sys.modules; returns (HfBackend, record of what was loaded)."""
+    from types import ModuleType, SimpleNamespace
+
+    seen: dict = {"loaded": [], "to": [], "tokenizers": 0}
+
+    class Model:
+        def __init__(self, kw): self.kw = kw
+        def eval(self): return self
+        def to(self, device):
+            seen["to"].append(device)
+            return self
+
+    class Auto:
+        @staticmethod
+        def from_pretrained(name, **kw):
+            seen["loaded"].append(kw)
+            return Model(kw)
+
+    class Tok:
+        @staticmethod
+        def from_pretrained(name):
+            seen["tokenizers"] += 1
+            return object()
+
+    class Config:
+        @staticmethod
+        def from_pretrained(name):
+            return SimpleNamespace(quantization_config={"quant_method": "bnb"} if pre_quantized else None)
+
+    class Bnb:
+        def __init__(self, **kw): self.kw = kw
+
+    tf = ModuleType("transformers")
+    tf.AutoModelForCausalLM, tf.AutoTokenizer, tf.AutoConfig, tf.BitsAndBytesConfig = Auto, Tok, Config, Bnb
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "transformers", tf)
+    return inprocess.HfBackend.__new__(inprocess.HfBackend), seen
+
+
+def test_cuda_loading_is_unchanged(monkeypatch):
+    backend, seen = _loader(monkeypatch, _Torch(cuda=True, mps=True))   # CUDA wins over MPS
+    loaded = backend.load("m", quantize_4bit=False, seed=3)
+    assert seen["loaded"] == [{"dtype": "torch.float16", "device_map": {"": 0}}] and seen["to"] == []
+    assert loaded.quantization == "none (float16)" and loaded.device == "cuda:0" and loaded.dtype == "float16"
+    q = backend.load("m", quantize_4bit=True, seed=3)
+    kw = seen["loaded"][-1]
+    assert kw["device_map"] == {"": 0} and kw["quantization_config"].kw["bnb_4bit_compute_dtype"] == "torch.float16"
+    assert q.quantization.startswith("4-bit nf4 on load")
+
+
+def test_mps_loads_float32_on_mps(monkeypatch):
+    backend, seen = _loader(monkeypatch, _Torch(mps=True))
+    loaded = backend.load("m", quantize_4bit=False, seed=3)
+    assert seen["loaded"] == [{"dtype": "torch.float32"}] and seen["to"] == ["mps"]
+    assert loaded.device == "mps" and loaded.dtype == "float32" and loaded.quantization == "none (float32)"
+
+
+def test_neither_cuda_nor_mps_loads_float32_on_the_cpu(monkeypatch):
+    backend, seen = _loader(monkeypatch, _Torch())
+    loaded = backend.load("m", quantize_4bit=False, seed=3)
+    assert seen["loaded"] == [{"dtype": "torch.float32"}] and seen["to"] == []
+    assert loaded.device == "cpu" and loaded.dtype == "float32" and loaded.quantization == "none (float32)"
+
+
+@pytest.mark.parametrize(("torch", "device"), [(_Torch(cuda=True), "Tesla T4"), (_Torch(mps=True), "mps"), (_Torch(), "cpu")])
+def test_versions_name_the_device(monkeypatch, torch, device):
+    from types import ModuleType
+
+    backend, _ = _loader(monkeypatch, torch)
+    for name in ("peft", "lm_eval"):
+        mod = ModuleType(name)
+        mod.__version__ = "x"
+        monkeypatch.setitem(sys.modules, name, mod)
+    monkeypatch.setattr(sys.modules["transformers"], "__version__", "y", raising=False)
+    backend.harness = True
+    assert backend.versions()["device"] == device
+    backend.harness = False
+    assert backend.versions()["lm_eval"] == "not used"
+
+
+@pytest.mark.parametrize("torch", [_Torch(), _Torch(mps=True)], ids=["cpu", "mps"])
+def test_qlora_without_cuda_is_refused_before_anything_loads(monkeypatch, torch):
+    backend, seen = _loader(monkeypatch, torch)
+    with pytest.raises(inprocess.Unsupported, match="needs CUDA and bitsandbytes.*method: lora"):
+        backend.load("m", quantize_4bit=True, seed=3)
+    assert seen["loaded"] == [] and seen["tokenizers"] == 0 and torch.seeded == []
+
+
+def test_the_stage_reports_a_qlora_refusal_as_it_is_not_as_a_harness_failure(tmp_path, clock, monkeypatch):
+    class NoCuda(FakeBackend):
+        def load(self, base_model, *, quantize_4bit, seed):
+            raise inprocess.Unsupported("4-bit loading (method: qlora) needs CUDA and bitsandbytes; run with method: lora")
+
+    fake = NoCuda(clock)
+    _use(monkeypatch, fake)
+    out = _run(tmp_path, method="qlora")
+    assert out["checked"] is False and "harness failed" not in out["note"] and "ImportError" not in out["note"]
+    assert out["note"].startswith("4-bit loading (method: qlora) needs CUDA") and "method: lora" in out["note"]
+    assert fake.calls == [] and "output" not in out
+
+
+def test_the_stage_records_device_and_dtype(tmp_path, clock, monkeypatch):
+    class Mps(FakeBackend):
+        def load(self, base_model, *, quantize_4bit, seed):
+            return Loaded(model="base", tokenizer=None, quantization="none (float32)", device="mps", dtype="float32")
+
+    _use(monkeypatch, Mps(clock))
+    out = _run(tmp_path, method="lora")
+    assert out["device"] == "mps" and out["dtype"] == "float32" and out["quantization"] == "none (float32)"

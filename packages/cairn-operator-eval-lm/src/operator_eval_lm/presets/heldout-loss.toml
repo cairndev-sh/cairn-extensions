@@ -1,0 +1,15 @@
+# heldout-loss — the held-out split losses alone (cairn-extensions#53).
+#
+# No benchmark task: the `eval.lm_eval` flow stage scores the base model and the base model plus the
+# candidate adapter on the val and test splits (the same method, rows and truncation as with any
+# preset) and nothing else. It does not import lm-eval, needs no route to the Hugging Face Hub for
+# datasets, and its time probe runs on the split rows alone. The preset for a box with no Hub access,
+# or a CPU / Apple Silicon machine where the benchmark presets are hours of compute.
+#
+# Served-candidate `eval/lm-eval` has nothing to run for it.
+
+name        = "heldout-loss"
+description = "Held-out val and test loss of the base model and the candidate; no benchmark tasks."
+
+loss_only = true
+tasks     = []

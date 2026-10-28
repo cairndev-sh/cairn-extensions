@@ -100,7 +100,7 @@ inputs:
   registered_model_name: {type: str, default: "", description: "MLflow Registered Model to add the adapter to (empty = none)."}
   stub: {type: bool, default: false, description: "Run the hermetic stub trainer and stub evaluation (no GPU): proves the pipeline, trains and measures nothing."}
   # cairn-extensions#42 — the `eval` leg.
-  eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_preset: {type: str, default: "forgetting", description: "cairn-operator-eval-lm task preset the eval leg runs for the base model and the candidate (forgetting: five tasks at 500 documents and MMLU at 10 per subject; heldout-loss: no benchmark, only the held-out val and test loss, for a box with no route to the Hugging Face Hub or a CPU/MPS machine)."}
   eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
   # ADR-0151 D11 — the box acquire starts and release stops. Must equal the environment's
   # `ml_target` (not checked by cairndev yet: cairndev-sh/cairn#216); its `instance_id`, `region` and `hourly_usd` are the connection's settings.

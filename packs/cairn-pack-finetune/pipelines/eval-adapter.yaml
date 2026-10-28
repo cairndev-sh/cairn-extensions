@@ -55,7 +55,7 @@ inputs:
   # else before a record exists.
   val_version: {type: str, role: validation, description: "dataset:<name>-val@<v> — the registered validation version the adapter was validated on."}
   test_version: {type: str, role: test, description: "dataset:<name>-test@<v> — the registered test version the adapter never saw."}
-  eval_preset: {type: str, default: "forgetting-ifeval", description: "cairn-operator-eval-lm task preset (forgetting-ifeval: forgetting plus IFEval; forgetting: five tasks at 500 documents and MMLU at 10 per subject)."}
+  eval_preset: {type: str, default: "forgetting-ifeval", description: "cairn-operator-eval-lm task preset (forgetting-ifeval: forgetting plus IFEval; forgetting: five tasks at 500 documents and MMLU at 10 per subject; heldout-loss: no benchmark, only the held-out val and test loss, for a box with no route to the Hugging Face Hub or a CPU/MPS machine)."}
   eval_seed: {type: int, default: 1234, description: "lm-eval's seeds for both models."}
   max_seq_len: {type: int, default: 2048, description: "Split-loss rows are truncated at this many tokens (the training run's max_seq_len)."}
   stub: {type: bool, default: false, description: "The stub evaluation (no GPU): proves the pipeline, measures nothing; `evaluated` then stops it."}

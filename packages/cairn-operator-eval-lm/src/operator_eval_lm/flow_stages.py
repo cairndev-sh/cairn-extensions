@@ -34,9 +34,15 @@ What one run does, in order:
 **What fails the leg and what does not.** A projection over budget, a split whose bytes do not
 match their pin, an unknown preset or an adapter that cannot be found raise: they are a
 configuration or a budget, not a measurement. A harness that is not installed or fails while
-scoring (an import error, a CUDA out-of-memory, a task that will not load) returns
-``checked=false`` with the reason and no scores, so the card says "not evaluated" and a training
-run is never lost to its evaluation. A process killed on the box fails the leg and the engine
+scoring (an import error, a CUDA out-of-memory) returns ``checked=false`` with the reason and no
+scores, so the card says "not evaluated" and a training run is never lost to its evaluation.
+The benchmarks and the held-out split loss fail apart (cairn-extensions#53): a task that will not
+load, or a harness error while scoring tasks, leaves the benchmark part ``checked=false`` with its
+note while the four split-loss figures are still scored and reported (``split_loss_checked=true``,
+``benchmarks_checked=false``). A preset with ``loss_only = true`` (``heldout-loss``) has no tasks,
+does not import lm-eval, and is ``checked`` on the split loss alone. A machine that cannot run
+the request (``method: qlora`` without CUDA) reports why, before any model loads
+(cairn-extensions#52); the model runs on CUDA, else MPS, else the CPU (``inprocess.pick_device``). A process killed on the box fails the leg and the engine
 retries it (``retry:`` on the leg); the retry starts the evaluation again.
 
 No endpoint and no secret: the ``hf`` backend loads weights in this process; no key is read, and
@@ -192,7 +198,9 @@ def eval_lm_eval(workdir: Path, config: dict, inputs: list[str]) -> dict:
         "split_loss_method": SPLIT_LOSS_METHOD,
     }
     try:
-        backend = inprocess.make_backend(stub=cfg.stub)
+        # a loss-only preset needs no lm-eval (the argument is passed only then: a backend factory
+        # that takes just `stub` keeps working)
+        backend = inprocess.make_backend(stub=cfg.stub, **({} if plan else {"harness": False}))
     except ImportError as e:
         return _not_checked(settings, f"harness unavailable (install cairn-operator-eval-lm[box] on the "
                                       f"box): {e}", started)
@@ -208,8 +216,13 @@ def eval_lm_eval(workdir: Path, config: dict, inputs: list[str]) -> dict:
         m = _measure(cfg, preset, plan, batch, rows, adapter, backend, settings, started)
     except (TimeBudgetExceeded, box_io.FetchError):
         raise
+    except inprocess.Unsupported as e:   # this machine cannot run what was asked: said as it is
+        return _not_checked(settings, str(e), started)
     except Exception as e:  # noqa: BLE001 — a failed measurement is "not evaluated", never a score
         return _not_checked(settings, f"harness failed: {type(e).__name__}: {e}", started)
+    if m["bench_error"] and not any(tokens for _, tokens in m["base_losses"].values()):
+        # the benchmarks failed and there is no held-out loss to report in their place
+        return _not_checked(settings, m["bench_error"], started)
     return _report(workdir, cfg, plan, settings, m, started)
 
 
@@ -228,6 +241,9 @@ def _measure(cfg, preset, plan, batch: int, rows: dict, adapter: str, backend, s
     settings["versions"] = backend.versions()
     base = backend.load(cfg.base_model, quantize_4bit=cfg.method == "qlora", seed=cfg.seed)
     settings["quantization"] = base.quantization
+    for key, value in (("device", base.device), ("dtype", base.dtype)):
+        if value:
+            settings[key] = value
     template, settings["chat_template_source"] = backend.chat_template(base, adapter)
     settings["adapter_base_model"] = backend.adapter_base(adapter)
     texts: dict[str, list[str]] = {}
@@ -238,17 +254,24 @@ def _measure(cfg, preset, plan, batch: int, rows: dict, adapter: str, backend, s
         texts[name] = [backend.render(base, m, template) for m in msgs]
 
     # ── 3. the time probe, on the base model ────────────────────────────────────────────────
+    # A benchmark that fails AS A MEASUREMENT (a task that will not load, a harness error) does not
+    # take the held-out split losses with it (cairn-extensions#53): the benchmark part is dropped,
+    # with its reason, and the split losses are still scored. The budget refusal is not that.
+    bench_error = ""
     probes: list[TaskProbe] = []
-    for task, limit in plan:
-        probe_limit = probe_limits(plan, cfg.probe_items)[task]
-        t0 = _now()
-        res, timing = backend.evaluate(base, task=task, limit=probe_limit, num_fewshot=preset.num_fewshot,
-                                       batch_size=batch, seed=cfg.seed)
-        scored, _ = scoring.documents(res, probe_limit)
-        _, full = scoring.documents(res, limit)
-        probes.append(TaskProbe(task=task, limit=limit, probe_limit=probe_limit, wall_s=_now() - t0,
-                                model_s=timing.model_s, requests=timing.requests, documents=scored,
-                                full_documents=full))
+    try:
+        for task, limit in plan:
+            probe_limit = probe_limits(plan, cfg.probe_items)[task]
+            t0 = _now()
+            res, timing = backend.evaluate(base, task=task, limit=probe_limit, num_fewshot=preset.num_fewshot,
+                                           batch_size=batch, seed=cfg.seed)
+            scored, _ = scoring.documents(res, probe_limit)
+            _, full = scoring.documents(res, limit)
+            probes.append(TaskProbe(task=task, limit=limit, probe_limit=probe_limit, wall_s=_now() - t0,
+                                    model_s=timing.model_s, requests=timing.requests, documents=scored,
+                                    full_documents=full))
+    except Exception as e:  # noqa: BLE001
+        bench_error, probes = f"harness failed: {type(e).__name__}: {e}", []
     split_texts = [t for name in texts for t in texts[name]]
     probe_rows = split_texts[:PROBE_SPLIT_ROWS]
     t0 = _now()
@@ -281,16 +304,28 @@ def _measure(cfg, preset, plan, batch: int, rows: dict, adapter: str, backend, s
             f"less a {cfg.time_margin:.0%} margin).")
 
     # ── 4–5. the two passes, identical calls ────────────────────────────────────────────────
+    state = {"error": bench_error}
+
     def scored_pass(model) -> tuple[dict, dict]:
-        out = {task: backend.evaluate(model, task=task, limit=limit, num_fewshot=preset.num_fewshot,
-                                      batch_size=batch, seed=cfg.seed)[0] for task, limit in plan}
+        out: dict = {}
+        if plan and not state["error"]:
+            try:
+                out = {task: backend.evaluate(model, task=task, limit=limit, num_fewshot=preset.num_fewshot,
+                                              batch_size=batch, seed=cfg.seed)[0] for task, limit in plan}
+            except Exception as e:  # noqa: BLE001 — see above: the split losses below still run
+                state["error"] = f"harness failed: {type(e).__name__}: {e}"
+                out = {}
         losses = {name: backend.split_loss(model, t, max_seq_len=cfg.max_seq_len) for name, t in texts.items()}
         return out, losses
 
     base_results, base_losses = scored_pass(base)
     candidate = backend.attach(base, adapter)   # the same loaded weights, the adapter on top
     cand_results, cand_losses = scored_pass(candidate)
+    bench_error = state["error"]
+    if bench_error:   # scores need both models: a half-scored pair is dropped
+        base_results, cand_results = {}, {}
     return {"base": base_results, "candidate": cand_results, "base_losses": base_losses,
+            "bench_error": bench_error, "bench_planned": bool(plan),
             "candidate_losses": cand_losses, "texts": texts, "skipped": skipped, "probes": probes,
             "probe": probe, "split_probe_s": split_probe_s}
 
@@ -304,7 +339,7 @@ def _report(workdir: Path, cfg, plan, settings: dict, m: dict, started: float) -
     probes, probe, split_probe_s = m["probes"], m["probe"], m["split_probe_s"]
     scores: list[dict] = []
     stats: dict[str, Any] = {}
-    for task, limit in plan:
+    for task, limit in (plan if base_results else []):
         b = {s.key: s for s in scoring.task_scores(base_results[task], task)}
         c = {s.key: s for s in scoring.task_scores(cand_results[task], task)}
         n_base, _ = scoring.documents(base_results[task], limit)
@@ -346,9 +381,27 @@ def _report(workdir: Path, cfg, plan, settings: dict, m: dict, started: float) -
         if skipped[name]:
             stats[f"{name}_rows_skipped"] = skipped[name]
 
-    checked = bool(scores) and not cfg.stub
-    notes = ["stub tier: no model was loaded and nothing was measured; the numbers are placeholders"
-             if cfg.stub else "" if scores else "the harness ran but no metric came back for both models"]
+    benchmarks_checked = bool(scores) and not cfg.stub
+    split_loss_checked = (not cfg.stub) and any(e["base"] is not None and e["candidate"] is not None
+                                                for e in split_loss.values())
+    loss_only = not m["bench_planned"]
+    # `checked` answers for what the preset is about: the benchmarks, or for a loss-only preset the
+    # held-out loss. The other part is its own flag, so one failing never hides the other.
+    checked = split_loss_checked if loss_only else benchmarks_checked
+    stats["benchmarks_checked"] = benchmarks_checked
+    stats["split_loss_checked"] = split_loss_checked
+    bench_error = m["bench_error"]
+    if cfg.stub:
+        bench_note = "stub tier: no model was loaded and nothing was measured; the numbers are placeholders"
+    elif loss_only:
+        bench_note = "" if split_loss_checked else "no held-out split rows were scored (val_uri / test_uri)"
+    elif scores:
+        bench_note = ""
+    elif bench_error:
+        bench_note = f"{bench_error}; the held-out split losses were still measured" if split_loss_checked else bench_error
+    else:
+        bench_note = "the harness ran but no metric came back for both models"
+    notes = [bench_note]
     trained_on = settings.get("adapter_base_model") or ""
     if trained_on and trained_on != cfg.base_model:
         # Unsloth's 4-bit loading substitutes a pre-quantised checkpoint for the named base: the

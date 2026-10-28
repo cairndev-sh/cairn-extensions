@@ -188,6 +188,11 @@ class LmEvalOp(Operation[LmEvalInput, LmEvalOutput]):
         ctx.report.stage("resolve", percent=0)
         if not inp.tasks:
             preset = presets.load(inp.preset or presets.DEFAULT_PRESET)
+            if preset.loss_only:
+                return self._stub(
+                    inp, f"preset {preset.name!r} scores only the held-out split loss, which needs the "
+                         "model's weights; eval/lm-eval measures a served candidate. Run it with the "
+                         "eval.lm_eval flow stage.", preset=preset.name)
             if preset.limits and not inp.limit:
                 # cairn-extensions#42 — a preset that sizes tasks apart (`limits`, e.g. MMLU per
                 # subject) needs one harness call per task; this operator makes one call with one
