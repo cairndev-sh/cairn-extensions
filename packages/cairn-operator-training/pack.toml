@@ -8,7 +8,7 @@
 
 [pack]
 name        = "cairn-operator-training"
-version     = "0.1.1"
+version     = "0.1.2"
 type        = "operator"
 description = "One SFT trainer: Unsloth QLoRA/LoRA as flow stages an engine runs on a GPU box, plus the stub and CPU/MPS local trainers."
 kind        = "operator"

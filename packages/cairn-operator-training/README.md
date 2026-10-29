@@ -40,7 +40,7 @@ pip install ./packages/cairn-contracts-training ./packages/cairn-contracts-train
 | Extra | What it is for |
 |---|---|
 | `gpu` | The Unsloth QLoRA trainer, pinned exactly to `images.py::TRAINER_PINS` (torch, unsloth, trl, peft, transformers, datasets, bitsandbytes, accelerate), plus `boto3` for `s3://` data, checkpoint mirroring and `artifact_target: s3`. Install it on the GPU box. |
-| `local` | Plain LoRA on CPU/MPS (no unsloth or bitsandbytes), ranges floored at the same pins. It is the pins only: a CPU box that reads `s3://` data, mirrors checkpoints or publishes to `s3` also needs `pip install boto3`. |
+| `local` | Plain LoRA on CPU, Apple-silicon MPS or a CUDA GPU (no unsloth or bitsandbytes; `method: qlora` still needs `gpu`), ranges floored at the same pins. Not on Intel Macs: PyTorch publishes no macOS x86_64 wheels for the pinned torch. It is the pins only: a CPU box that reads `s3://` data, mirrors checkpoints or publishes to `s3` also needs `pip install boto3`. |
 | `track-mlflow` | MLflow run, dataset and model logging (`report_to: [mlflow]`). Not part of `gpu`: without it, a run asked to report to MLflow trains untracked, and `train.qlora` returns why as `tracking_error` (the pipeline step's `train_qlora_tracking_error` finding). |
 
 boto3 is imported only when a run reads or writes S3, so a run without S3 needs none. In a flow

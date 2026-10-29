@@ -120,14 +120,25 @@ def _use_gpu_unsloth(spec: TrainSpec) -> bool:
     """Route a REAL run on a CUDA GPU to the unsloth QLoRA engine (train_entry) — the
     same entry a trainer image runs. Validation mode + non-GPU boxes fall
     through to the CPU/MPS plain-LoRA path below. Guarded on an ACTUAL CUDA device so
-    hermetic CI (no GPU) always takes the CPU path."""
+    hermetic CI (no GPU) always takes the CPU path.
+
+    A ``lora`` run on a CUDA machine without unsloth (the ``[local]`` extra, e.g. the
+    laptop demo on an NVIDIA card) takes the plain-LoRA path on that GPU: it asked for
+    nothing unsloth adds. A ``qlora`` run still goes to unsloth and fails loud without
+    it — 4-bit QLoRA is what the ``[gpu]`` extra is for, and silently training plain
+    LoRA instead would change the method behind the caller's back."""
     if _validating(spec):
         return False
     try:
         import torch  # noqa: PLC0415 — the [local]/[gpu] extra; a cheap cuda probe
-        return bool(torch.cuda.is_available())
+        if not torch.cuda.is_available():
+            return False
     except Exception:  # noqa: BLE001 — no torch / probe failure ⇒ CPU path
         return False
+    if spec.method == "qlora":
+        return True
+    import importlib.util  # noqa: PLC0415
+    return importlib.util.find_spec("unsloth") is not None
 
 
 def _train_gpu_unsloth(spec: TrainSpec, reporter: Any = None, out_dir: str | None = None) -> TrainResult:

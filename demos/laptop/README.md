@@ -21,8 +21,9 @@ training needs approval, and so does moving a promote tag.
 
 ## Prerequisites
 
-- macOS on Apple silicon, or Linux. Python 3.12 (uv fetches it if you have another) and
-  [uv](https://docs.astral.sh/uv/).
+- macOS on Apple silicon, or Linux (CPU, or an NVIDIA GPU, which the LoRA run then uses). Python
+  3.12 (uv fetches it if you have another) and [uv](https://docs.astral.sh/uv/). Not an Intel Mac:
+  PyTorch publishes no macOS x86_64 wheels for the torch this demo pins, so `install.sh` stops there.
 - About 5 GB of disk for the virtualenv (torch is most of it; on Linux the PyPI torch wheel is the
   CUDA build and runs on the CPU too, `TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu`
   selects the small one).

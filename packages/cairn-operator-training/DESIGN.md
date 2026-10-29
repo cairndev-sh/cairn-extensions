@@ -236,3 +236,4 @@ pack — install it before trusting them.
 | 2026-10-26 | #28: the stub tier keeps run-scoped checkpoints in `CAIRN_CHECKPOINT_BUCKET` and resumes from them, so the `sft` retry is proven on the stub |
 | 2026-10-26 | `cairndev>=0.2.0,<0.4` and `[compat]` to match: proven on cairndev 0.3.0 before the first PyPI release, so a 0.3 install is not downgraded | cairn-extensions#10 |
 | 2026-10-28 | #51: `package.adapter` and `train.qlora` read a `file://` adapter (the CPU/MPS trainer's `adapter_uri`) as the bare path, so a local train gets the same `kind: model` descriptor as a CUDA one; 0.1.1 | #51 |
+| 2026-10-29 | #60: `train/local` on a CUDA machine sends a `lora` run to unsloth only when unsloth is installed; without it (the `[local]` extra, e.g. the laptop demo on an NVIDIA card) it trains plain LoRA on that GPU. `qlora` still requires unsloth and fails loud without it; 0.1.2 | #60 |

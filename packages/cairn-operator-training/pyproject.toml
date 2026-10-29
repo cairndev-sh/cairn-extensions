@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cairn-operator-training"
-version = "0.1.1"
+version = "0.1.2"
 description = "SFT for cairn: one Unsloth QLoRA/LoRA trainer as flow stages (sft-train, DPO, distill) that an engine runs on a CUDA GPU box, plus the stub and CPU/MPS local trainers."
 readme = "README.md"
 license = "Apache-2.0"

@@ -14,7 +14,7 @@ from operator_training.schemas.train import TrainSpec
 
 
 def _spec(**kw):
-    return TrainSpec(dataset_uri="ds", method="qlora", output_name="out", **kw)
+    return TrainSpec(**{"dataset_uri": "ds", "method": "qlora", "output_name": "out", **kw})
 
 
 def test_no_torch_or_no_cuda_takes_cpu_path(monkeypatch):
@@ -55,3 +55,39 @@ def test_gpu_dispatch_wraps_unsloth_result(monkeypatch):
     # adapter_uri forced to the LOCAL dir train_entry writes (the caller publishes it),
     # NOT the hf:// push target. No job workdir here, so /tmp/<output_name>.
     assert res.adapter_uri == called["output_dir"] == "/tmp/out"
+
+
+class _CudaTorch:
+    """A stand-in torch whose cuda probe says a GPU is present."""
+
+    class cuda:  # noqa: N801 — mirrors torch.cuda
+        @staticmethod
+        def is_available():
+            return True
+
+
+def test_lora_on_cuda_without_unsloth_takes_plain_lora_on_the_gpu(monkeypatch):
+    # The [local] extra on an NVIDIA machine (the laptop demo): no unsloth installed, so a
+    # `lora` run must not be routed to the unsloth engine ("No module named 'unsloth'").
+    import importlib.util as iu
+
+    monkeypatch.setitem(sys.modules, "torch", _CudaTorch)
+    monkeypatch.setattr(iu, "find_spec", lambda name, *a, **k: None)
+    assert local._use_gpu_unsloth(_spec(method="lora")) is False
+
+
+def test_lora_on_cuda_with_unsloth_keeps_the_unsloth_engine(monkeypatch):
+    import importlib.util as iu
+
+    monkeypatch.setitem(sys.modules, "torch", _CudaTorch)
+    monkeypatch.setattr(iu, "find_spec", lambda name, *a, **k: object() if name == "unsloth" else None)
+    assert local._use_gpu_unsloth(_spec(method="lora")) is True
+
+
+def test_qlora_on_cuda_without_unsloth_still_fails_loud(monkeypatch):
+    # 4-bit QLoRA is the [gpu] extra's job: no silent switch to plain LoRA.
+    import importlib.util as iu
+
+    monkeypatch.setitem(sys.modules, "torch", _CudaTorch)
+    monkeypatch.setattr(iu, "find_spec", lambda name, *a, **k: None)
+    assert local._use_gpu_unsloth(_spec(method="qlora")) is True
