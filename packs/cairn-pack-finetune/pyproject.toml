@@ -21,7 +21,7 @@ dependencies = [
     "cairndev>=0.3.1,<0.4",
     # The kernels the flow names (sample.fidelity, train.qlora 1.2.0, eval.checkpoints,
     # package.adapter); the base install carries no training stack.
-    "cairn-operator-training>=0.1.1,<0.2",
+    "cairn-operator-training>=0.1.2,<0.2",
     # The kernel the `sft-eval` flow names (eval.lm_eval, cairn-extensions#42): the control plane
     # checks a flow's stages against its registry at launch; the box needs the `[box]` extra.
     "cairn-operator-eval-lm>=0.3,<0.4",
