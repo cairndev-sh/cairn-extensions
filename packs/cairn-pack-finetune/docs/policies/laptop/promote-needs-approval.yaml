@@ -1,4 +1,4 @@
-# policies/promote-needs-approval.yaml — tagging an adapter as the candidate needs a person.
+# docs/policies/laptop/promote-needs-approval.yaml — tagging an adapter as the candidate needs a person.
 #
 # Keyed on the capability `artifact.promote` (what the `artifact/promote` operator provides), not on
 # a pipeline leg: wherever the tag would move, in any pipeline, a person approves first. The

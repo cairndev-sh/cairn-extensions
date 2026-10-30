@@ -25,7 +25,7 @@ def _plan(name: str = "sft-local"):
 def _engine():
     from cairn.core.policy.engine import PolicyEngine
 
-    return PolicyEngine(DEMO / "policies")
+    return PolicyEngine(PACK / "docs" / "policies" / "laptop")
 
 
 def test_both_policies_load_and_are_require_hitl():
@@ -83,7 +83,7 @@ def test_the_shell_scripts_parse(script):
 
 def test_run_sh_help_needs_nothing_installed():
     out = subprocess.run(["bash", str(DEMO / "run.sh"), "--help"], check=True, capture_output=True, text=True).stdout
-    for flag in ("--auto-approve", "--base-model", "--tiny", "--input"):
+    for flag in ("--auto-approve", "--base-model", "--tiny"):
         assert flag in out
 
 
@@ -99,7 +99,7 @@ def test_the_tiny_model_builds_offline_and_loads(tmp_path):
     pytest.importorskip("tokenizers")
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("tiny_model", DEMO / "tiny_model.py")
+    spec = importlib.util.spec_from_file_location("tiny_model", ROOT / "tests" / "fixtures" / "tiny_model.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     out = mod.build(tmp_path / "m", mod.DEFAULT_DATA)
@@ -108,3 +108,32 @@ def test_the_tiny_model_builds_offline_and_loads(tmp_path):
 
     tok, model = AutoTokenizer.from_pretrained(out), AutoModelForCausalLM.from_pretrained(out)
     assert len(tok) == model.config.vocab_size and tok.pad_token and sum(p.numel() for p in model.parameters()) < 500_000
+
+
+def test_prepares_event_carries_exactly_what_sft_locals_trigger_needs():
+    """The chain, without a server: `prepare`'s `outputs:` resolved over a finished run's findings
+    (the `dataset_versions` key `test_prepare.py` pins), then mapped through `sft-local`'s own
+    trigger, give `sft-local` its three versions by role and leave its base model to its default."""
+    import yaml
+
+    from cairn.core.dispatch.leg_hooks import resolve_pipeline_outputs
+    from cairn.core.engine.triggers_grammar import parse_declared_triggers
+    from cairn.core.engine.triggers_spec import map_inputs
+
+    prep = yaml.safe_load((ROOT / "packs" / "cairn-pack-dataset-prep" / "pipelines" / "prepare.yaml").read_text())
+    sft = yaml.safe_load((PACK / "pipelines" / "sft-local.yaml").read_text())
+    findings = {"dataset_versions": ["laptop-demo-train@1", "laptop-demo-val@1", "laptop-demo-test@1"]}
+    payload, errors = resolve_pipeline_outputs(prep["outputs"], inputs={"base_model": ""},
+                                               steps={"prepare": {"findings": findings}})
+    (trigger,) = parse_declared_triggers(sft["triggers"], where="sft-local")
+    assert prep["emits"] == trigger.topic == "dataset.prepared" and trigger.enabled is False
+    assert map_inputs(payload, trigger.input) == {
+        "train_version": "dataset:laptop-demo-train@1",
+        "val_version": "dataset:laptop-demo-val@1",
+        "test_version": "dataset:laptop-demo-test@1",
+    }
+    # none named: null, so sft-local keeps its default; the three versions always resolve
+    assert "base_model" in errors and not {"train_version", "val_version", "test_version"} & set(errors)
+    assert map_inputs(resolve_pipeline_outputs(prep["outputs"], inputs={"base_model": "/m"},
+                                               steps={"prepare": {"findings": findings}})[0],
+                      trigger.input)["base_model"] == "/m"

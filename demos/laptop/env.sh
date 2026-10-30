@@ -22,8 +22,8 @@ _pack="$(cd "$_laptop_dir/../.." && pwd)/packs/cairn-pack-finetune"
 export CAIRN_PROFILE="$_pack/profiles/finetune-local.toml"
 export CAIRN_STORAGE="sqlite:///$LAPTOP_DEMO_WORK/cairn.db"
 export CAIRN_AUDIT_LOG="$LAPTOP_DEMO_WORK/audit.jsonl"
-# two policies a person owns, outside the pipelines (demos/laptop/policies/)
-export CAIRN_POLICIES_DIR="$_laptop_dir/policies"
+# the deployment's policies: two example policies in the finetune pack (docs/policies/laptop: a person owns them, no pack loads them)
+export CAIRN_POLICIES_DIR="$_pack/docs/policies/laptop"
 
 # the registered dataset versions and the adapter live in a local S3 (moto_server)
 export CAIRN_ARTIFACT_S3_BUCKET="${CAIRN_ARTIFACT_S3_BUCKET:-cairn-laptop-demo}"

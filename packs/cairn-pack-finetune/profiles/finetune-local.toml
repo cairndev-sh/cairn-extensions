@@ -24,7 +24,7 @@
 #     approvals and licence acceptance, LLM and MCP calls there; a pipeline's gate approvals and
 #     promotion are on the run record instead (cairndev-sh/cairn#233).
 #   * Governance that a person decides (a gate that waits) is not set here: policies are loaded
-#     from CAIRN_POLICIES_DIR (demos/laptop/policies/).
+#     from CAIRN_POLICIES_DIR (this pack's docs/policies/laptop/).
 
 [profile]
 visibility = "public"

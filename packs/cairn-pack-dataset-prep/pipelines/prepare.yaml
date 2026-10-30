@@ -143,7 +143,18 @@ steps:
       steps.format.conformant == steps.format.total &&
       length(steps.prepare.findings.intake_verdicts[?contains(@, '=blocked') || contains(@, '=invalid_format')]) == `0`
 
+# ADR-0161 (cairndev 0.3.3): when the pipeline ends `done` (after `data-ok`), these outputs are
+# resolved and published on `dataset.prepared`, so a pipeline that trains on prepared data can start
+# on it (finetune/sft-local declares that trigger, paused until a person enables it). Each version is
+# picked by its role suffix, never by position.
+emits: dataset.prepared
+
 outputs:
+  train_version: "join('', ['dataset:', steps.prepare.findings.dataset_versions[?contains(@, '-train@')] | [0]])"
+  val_version: "join('', ['dataset:', steps.prepare.findings.dataset_versions[?contains(@, '-val@')] | [0]])"
+  test_version: "join('', ['dataset:', steps.prepare.findings.dataset_versions[?contains(@, '-test@')] | [0]])"
+  # the model the data was profiled for; null when none was named, so a consumer keeps its own default
+  base_model: "input.base_model || `null`"
   versions: prepare.dataset_versions
   verdicts: prepare.intake_verdicts
   manifest: prepare.dataset_manifest_output

@@ -3,26 +3,26 @@
 #
 #   demos/laptop/run.sh                       # interactive: you approve each human gate
 #   demos/laptop/run.sh --auto-approve        # answers the human gates as `dev` (CI, or to just watch it run)
-#   demos/laptop/run.sh --tiny --auto-approve # a throwaway 0.1M-parameter model, built offline: ~1 minute
+#   demos/laptop/run.sh --tiny --auto-approve # a throwaway 0.1M-parameter model, built offline
 #   demos/laptop/run.sh --base-model <hub id or local model directory>
 #
-# It starts a local S3 (moto) and the control plane (`cairn dev --engine-only`), logs in, runs
-# `dataset-prep/prepare` on the sample, then `finetune/sft-local` on the versions that registered
-# (data prep -> LoRA -> held-out loss -> automatic gate -> approval -> promote), prints the result
-# and checks the audit log. Run demos/laptop/install.sh once first.
+# Two declared pipelines in their own packs, joined by an event, nothing in between:
+# you launch `dataset-prep/prepare`; when its data gate passes it emits `dataset.prepared` with
+# the train/val/test versions (ADR-0161), and `finetune/sft-local` starts on that event by its own
+# trigger (ADR-0131 D4), which this script turns on once (ADR-0160). Everything below is a
+# `cairn` command you can type yourself. Run demos/laptop/install.sh once first.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 
-auto=0; tiny=0; base_model=""; inputs=(); timeout_s="${LAPTOP_DEMO_TIMEOUT:-3600}"
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; cat <<'USAGE'
+auto=0; tiny=0; base_model=""; timeout_s="${LAPTOP_DEMO_TIMEOUT:-3600}"
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; cat <<'USAGE'
 
 options:
   --auto-approve        answer every human gate as `dev` instead of waiting for you
-  --base-model X        a Hugging Face model id or a local model directory (default: the pipeline's, SmolLM2-135M)
-  --tiny                build a tiny random-weight model offline and use it (implies a higher learning rate)
-  -i, --input K=V       pass an input to finetune/sft-local (repeatable), e.g. -i max_steps=60
+  --base-model X        a Hugging Face model id or a local model directory (default: sft-local's, SmolLM2-135M)
+  --tiny                build a tiny random-weight model offline and use it
   -h, --help            this text
 environment: LAPTOP_DEMO_PORT (8765), LAPTOP_DEMO_S3_PORT (5765), LAPTOP_DEMO_WORK (a new temp dir),
              LAPTOP_DEMO_TIMEOUT (seconds before giving up, 3600); see env.sh
@@ -33,7 +33,6 @@ while [ $# -gt 0 ]; do
     --auto-approve) auto=1; shift ;;
     --tiny) tiny=1; shift ;;
     --base-model) [ $# -ge 2 ] || { usage >&2; exit 2; }; base_model="$2"; shift 2 ;;
-    -i|--input) [ $# -ge 2 ] || { usage >&2; exit 2; }; inputs+=("$2"); shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "run.sh: unknown option $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -48,8 +47,7 @@ say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'run.sh: %s\n' "$*" >&2; exit 1; }
 command -v cairn >/dev/null || die "cairn is not on PATH: run demos/laptop/install.sh first"
 command -v moto_server >/dev/null || die "moto_server is not on PATH: run demos/laptop/install.sh first"
-view() { python "$here/pipeline_view.py" "$@"; }
-t0=$SECONDS; lap() { printf '    (%ss)\n' "$((SECONDS - t0))"; }
+t0=$SECONDS
 
 pids=()
 cleanup() {
@@ -74,9 +72,8 @@ cd "$LAPTOP_DEMO_WORK"
 
 if [ "$tiny" = 1 ]; then
   say "a tiny random-weight model, built offline"
-  python "$here/tiny_model.py" "$LAPTOP_DEMO_WORK/tiny-model" >/dev/null 2>&1 || die "could not build the tiny model"
+  python "$repo/tests/fixtures/tiny_model.py" "$LAPTOP_DEMO_WORK/tiny-model" >/dev/null 2>&1 || die "could not build the tiny model"
   base_model="$LAPTOP_DEMO_WORK/tiny-model"
-  inputs+=("learning_rate=0.002")   # random weights need a bigger step to show a gain in 30 steps
 fi
 
 say "a local S3 (moto) on :$LAPTOP_DEMO_S3_PORT and the control plane on :$LAPTOP_DEMO_PORT"
@@ -98,102 +95,83 @@ for _ in $(seq 1 90); do
 done
 [ "$ok" = 1 ] || die "the control plane did not come up (see $LAPTOP_DEMO_WORK/server.log)"
 echo "    logged in as dev; policies: $(ls "$CAIRN_POLICIES_DIR" | tr '\n' ' ')"
-lap
 
-# drive PIPELINE_ID: follow it to the end, answering the human gates (you, or --auto-approve as dev).
+say "the chain: finetune/sft-local starts on dataset.prepared — paused until a person turns it on"
+cairn remote triggers
+trigger="$(cairn remote triggers | awk '$2 == "event" && $4 == "pipeline:finetune/sft-local" {print $1; exit}')"
+[ -n "$trigger" ] || die "sft-local's event trigger is not stored (is cairn-pack-finetune installed?)"
+cairn remote enable-trigger "$trigger"
+
+# One read the CLI does not print yet: a pipeline's status and the steps waiting on a person.
+# (`cairn remote pipeline <id>` prints the full record as JSON; a `--watch` for a running
+# pipeline would make this line go.)
+state() {
+  cairn remote pipeline "$1" | python -c '
+import json, sys
+p = json.load(sys.stdin); st = p.get("step_state") or {}
+wait = [s for s, v in st.items() if str(v.get("status", "")).startswith("awaiting")]
+print(p.get("status", ""), " ".join(wait))'
+}
+
+# Follow PIPELINE to the end, answering each human gate (you, or --auto-approve as dev).
 drive() {
-  local pid="$1" line status gates failed progress last="" g ans rc deadline=$((SECONDS + timeout_s)) notty=0
+  local pid="$1" status waiting g ans deadline=$((SECONDS + timeout_s)) last=""
   while :; do
-    [ "$SECONDS" -lt "$deadline" ] || die "gave up after ${timeout_s}s (LAPTOP_DEMO_TIMEOUT); pipeline $pid is still $status"
-    line="$(view state "$pid")" || die "cannot read pipeline $pid from the control plane"
-    IFS='|' read -r status gates failed progress <<<"$line"
-    if [ "$progress" != "$last" ]; then printf '    %s\n' "$progress"; last="$progress"; fi
+    [ "$SECONDS" -lt "$deadline" ] || die "gave up after ${timeout_s}s (LAPTOP_DEMO_TIMEOUT); pipeline $pid is still running"
+    read -r status waiting <<<"$(state "$pid")"
+    [ "$status $waiting" != "$last" ] && echo "    $status ${waiting:+(waiting: $waiting)}" && last="$status $waiting"
     case "$status" in
       done) return 0 ;;
       failed|cancelled)
-        # say why: the failed leg's error and its run's event log, then the control plane's log
-        printf '\n  why it failed:\n' >&2
-        view why "$pid" "${LAPTOP_DEMO_LOG_LINES:-60}" >&2 || true
-        printf '\n  the last lines of %s:\n' "$LAPTOP_DEMO_WORK/server.log" >&2
+        cairn remote findings "$pid" >&2 || true
         tail -n "${LAPTOP_DEMO_LOG_LINES:-60}" "$LAPTOP_DEMO_WORK/server.log" | sed 's/^/    | /' >&2
-        die "pipeline $pid $status${failed:+ at: $failed} (legs' logs: $LAPTOP_DEMO_WORK/server.log)" ;;
+        die "pipeline $pid $status (logs: $LAPTOP_DEMO_WORK/server.log)" ;;
     esac
-    if [ -n "$gates" ]; then
-      for g in $gates; do
-        echo
-        echo "  A person is asked:"
-        view card "$pid" "$g"
-        echo "  approve with:  . $here/env.sh && cairn remote advance $pid $g --approver dev"
-        if [ "$auto" = 1 ]; then
-          cairn remote advance "$pid" "$g" --approver dev >/dev/null
-          echo "  --auto-approve: approved $g as dev"
-        elif [ "$notty" = 0 ] && [ -t 0 ]; then
-          printf '  Press Enter to approve here as dev, type n to cancel the pipeline, or run the command above in another terminal. '
-          while :; do
-            rc=0; read -r -t 3 ans || rc=$?
-            if [ "$rc" = 0 ]; then
-              case "$ans" in
-                n|N|no|NO) cairn remote cancel-pipeline "$pid" >/dev/null; die "cancelled by you at $g" ;;
-                *) cairn remote advance "$pid" "$g" --approver dev >/dev/null; echo "  approved $g as dev"; break ;;
-              esac
-            elif [ "$rc" = 1 ]; then notty=1; break   # stdin closed: wait for the command above
-            fi
-            line="$(view state "$pid")"; IFS='|' read -r status gates failed progress <<<"$line"
-            case " $gates " in *" $g "*) ;; *) echo "(approved elsewhere)"; break ;; esac
-          done
-        else
-          echo "  waiting for that command (no terminal to ask on)..."
-        fi
-      done
-    fi
+    for g in $waiting; do
+      echo "  gate $g is asking a person. What it has measured so far:  cairn remote findings $pid"
+      echo "  approve with:  . $here/env.sh && cairn remote advance $pid $g --approver dev"
+      if [ "$auto" = 1 ]; then
+        cairn remote advance "$pid" "$g" --approver dev >/dev/null && echo "  --auto-approve: approved $g as dev"
+      elif [ -t 0 ]; then
+        printf '  Enter approves as dev, n cancels the pipeline: '
+        read -r ans || ans=""
+        case "$ans" in
+          n|N|no|NO) cairn remote cancel-pipeline "$pid" >/dev/null; die "cancelled by you at $g" ;;
+          *) cairn remote advance "$pid" "$g" --approver dev >/dev/null; echo "  approved $g as dev" ;;
+        esac
+      fi
+    done
     sleep 2
   done
 }
 
-launch() { # launch REF [-i k=v ...]: print the new pipeline id
-  local out pid
-  out="$(cairn remote launch "$@" 2>&1)" || { printf '%s\n' "$out" >&2; die "launch refused"; }
-  pid="$(printf '%s\n' "$out" | sed -n 's/^pipeline_id=\([^ ]*\).*/\1/p' | head -1)"
-  [ -n "$pid" ] || { printf '%s\n' "$out" >&2; die "no pipeline id in the launch output"; }
-  printf '%s\n' "$pid"
-}
-
-say "1/2  data prep: dataset-prep/prepare on the pack's 200-row sample"
+say "1/2  data prep: you launch dataset-prep/prepare on the pack's 200-row sample"
 sample="$repo/packs/cairn-pack-dataset-prep/data/sample-ifc.jsonl"
 [ -f "$sample" ] || die "sample not found: $sample"
-prep="$(launch dataset-prep/prepare -i "path=$sample" -i register=laptop-demo -i val_ratio=0.1 -i test_ratio=0.1)"
+args=(-i "path=$sample" -i register=laptop-demo -i val_ratio=0.1 -i test_ratio=0.1)
+[ -n "$base_model" ] && args+=(-i "base_model=$base_model")
+out="$(cairn remote launch dataset-prep/prepare "${args[@]}")" || { echo "$out" >&2; die "launch refused"; }
+prep="$(printf '%s\n' "$out" | sed -n 's/^pipeline_id=\([^ ]*\).*/\1/p' | head -1)"
+[ -n "$prep" ] || { echo "$out" >&2; die "no pipeline id in the launch output"; }
 echo "    pipeline $prep"
 drive "$prep"
-eval "$(view versions "$prep" | sed 's/^\([a-z]*\)=\(.*\)$/v_\1="\2"/')"
-echo "    registered: $v_train  $v_val  $v_test"
-lap
 
-say "2/2  fine-tune: finetune/sft-local (LoRA, ${base_model:-the default small model}, held-out loss)"
-args=(-i "train_version=$v_train" -i "val_version=$v_val" -i "test_version=$v_test")
-[ -n "$base_model" ] && args+=(-i "base_model=$base_model")
-for kv in ${inputs[@]+"${inputs[@]}"}; do args+=(-i "$kv"); done
-ft="$(launch finetune/sft-local "${args[@]}")"
-echo "    pipeline $ft"
-echo "    follow it from another terminal:  . $here/env.sh && cairn remote pipeline $ft"
+say "2/2  fine-tune: finetune/sft-local, started by the dataset.prepared event — not by this script"
+ft=""
+for _ in $(seq 1 60); do
+  ft="$(cairn remote pipelines | awk '$NF == "sft-local" {print $1; exit}')"
+  [ -n "$ft" ] && break
+  sleep 1
+done
+[ -n "$ft" ] || die "no sft-local pipeline started on dataset.prepared (see $LAPTOP_DEMO_WORK/server.log)"
+echo "    pipeline $ft, its trigger:"
+cairn remote pipeline "$ft" | python -c 'import json,sys; print("      ", json.load(sys.stdin).get("trigger"))'
 drive "$ft"
-lap
 
 say "result"
-view summary "$ft"
+cairn remote findings "$ft"
 
-say "who decided what (the pipeline records, the durable trail of the gates)"
-view trail "$prep"
-view trail "$ft"
-
-say "audit log: $CAIRN_AUDIT_LOG"
-if [ -s "$CAIRN_AUDIT_LOG" ]; then
-  echo "    $(wc -l <"$CAIRN_AUDIT_LOG" | tr -d ' ') event(s) written by the audit sink"
-  chain="$(cairn lineage --json | python -c 'import json,sys; print(json.load(sys.stdin)["chain_ok"])')" || chain="unreadable"
-  echo "    cairn lineage --json | .chain_ok  ->  $chain"
-  [ "$chain" = "True" ] || die "the audit chain did not verify"
-else
-  echo "    empty: no event of this run reached the audit sink (known limit, cairndev-sh/cairn#233);"
-  echo "    the approvals above are on the pipelines' records: cairn remote pipeline $ft"
-fi
+say "the audit log: every gate decision, the promotion and the trigger switch, hash-chained"
+cairn audit verify
 
 say "done in $((SECONDS - t0))s. Work dir (db, logs, audit): $LAPTOP_DEMO_WORK"

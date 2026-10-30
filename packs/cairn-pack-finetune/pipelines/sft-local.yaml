@@ -31,6 +31,20 @@ description: >
 outcome: Fine-tune a small model on prepared data on your laptop and decide whether to keep it
 suite: model
 
+# Starts on `dataset.prepared`, which dataset-prep/prepare emits when its data gate has passed
+# (ADR-0131 D4, ADR-0161). Paused until a person enables it in this workspace
+# (`cairn remote enable-trigger <id>`, ADR-0160): installing the pack starts nothing. The event's
+# publisher is recorded on this pipeline's `trigger`, so the record names the data prep that fed it.
+triggers:
+  - kind: event
+    topic: dataset.prepared
+    description: train on the versions dataset-prep/prepare just registered
+    input:
+      train_version: $event.train_version
+      val_version: $event.val_version
+      test_version: $event.test_version
+      base_model: $event.base_model
+
 inputs:
   # ADR-0146 — each version must have the role its input names, and a training version must carry
   # an intake verdict; the launch door refuses anything else before a record exists.
