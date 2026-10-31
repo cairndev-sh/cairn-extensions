@@ -4,7 +4,7 @@
 #   demos/laptop/install.sh                  # creates demos/laptop/.venv
 #   LAPTOP_DEMO_VENV=/path/to/venv demos/laptop/install.sh
 #
-# The released engine (cairndev 0.3.1) plus this checkout's packs and operators, installed
+# The released engine (cairndev 0.3.3) plus this checkout's packs and operators, installed
 # editable: the fixes the demo needs (eval-lm 0.3.0's CPU/MPS device and `heldout-loss` preset,
 # training 0.1.1's file:// adapter hash, lm-eval[api]) are on main and not yet on PyPI. torch comes
 # from PyPI (macOS arm64 wheels carry MPS; Linux wheels are the CUDA build and run on CPU too, but
@@ -14,7 +14,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 venv="${LAPTOP_DEMO_VENV:-$here/.venv}"
-core="${CAIRNDEV_VERSION:-0.3.1}"
+core="${CAIRNDEV_VERSION:-0.3.3}"
 
 command -v uv >/dev/null || { echo "install.sh: uv is required (https://docs.astral.sh/uv/)" >&2; exit 1; }
 
@@ -25,8 +25,16 @@ export VIRTUAL_ENV="$venv" PATH="$venv/bin:$PATH"
 extra_index=()
 [ -n "${TORCH_INDEX_URL:-}" ] && extra_index=(--extra-index-url "$TORCH_INDEX_URL" --index-strategy unsafe-best-match)
 
-echo "==> the released core: cairndev==$core [train, dataflow-engine]"
-uv pip install -q "${extra_index[@]+"${extra_index[@]}"}" "cairndev[train,dataflow-engine]==$core"
+# The demo's event chain needs cairndev 0.3.3 (pipeline `emits:`, ADR-0161; the trigger switch,
+# ADR-0160). Before that release, CAIRNDEV_SOURCE=/path/to/a/cairn/checkout installs it from there.
+if [ -n "${CAIRNDEV_SOURCE:-}" ]; then
+  echo "==> the core from $CAIRNDEV_SOURCE [train, dataflow-engine]"
+  uv pip install -q "${extra_index[@]+"${extra_index[@]}"}" -e "$CAIRNDEV_SOURCE[train,dataflow-engine]" \
+    -e "$CAIRNDEV_SOURCE/packages/cairn-client"
+else
+  echo "==> the released core: cairndev==$core [train, dataflow-engine]"
+  uv pip install -q "${extra_index[@]+"${extra_index[@]}"}" "cairndev[train,dataflow-engine]==$core"
+fi
 
 echo "==> this checkout's contracts, operators and packs"
 # The contract wheels are installed from the checkout too: dataset-checks pins a stages version

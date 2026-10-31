@@ -1,4 +1,4 @@
-# policies/training-needs-approval.yaml — training starts only after a person says so.
+# docs/policies/laptop/training-needs-approval.yaml — training starts only after a person says so.
 #
 # An environment rule, not a pipeline's: the policy decides at plan time that a person approves
 # before any `finetune/sft-train` leg (the smoke run and the full run), whichever pipeline asks for

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""demos/laptop/tiny_model.py — build a throwaway Llama-style model and tokenizer on disk, offline.
+"""tests/fixtures/tiny_model.py — build a throwaway Llama-style model and tokenizer on disk, offline.
 
-    python demos/laptop/tiny_model.py <output-dir> [--data <jsonl>]
+    python tests/fixtures/tiny_model.py <output-dir> [--data <jsonl>]
 
 ~0.1M random-weight parameters and a 512-token BPE tokenizer trained on the demo's sample rows. It
-writes sentences of nothing, which is the point: it lets `run.sh --base-model <output-dir>` prove
+writes sentences of nothing, which is the point: it lets `demos/laptop/run.sh --tiny` prove
 the whole governed path (prepare, LoRA, held-out loss, gates, promote) in about a minute with no
 download. The default run uses a real small model from the Hugging Face Hub instead.
 """

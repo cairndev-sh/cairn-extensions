@@ -54,11 +54,12 @@ def _own_box_with_laptop_defaults() -> dict:
 def test_sft_local_is_sft_own_box_with_the_laptop_defaults():
     """There is no include between pipeline files, so `sft-local.yaml` is a copy: this pins it to
     `sft-own-box.yaml` key for key (gates, legs, retries, series, approvers, outputs) except the
-    defaults above."""
+    defaults above, and the laptop demo's event trigger, which only `sft-local` declares."""
     local, own = _pipeline("sft-local"), _own_box_with_laptop_defaults()
     assert local["name"] == "sft-local" and own["name"] == "sft-own-box"
     for key in ("name", "description", "outcome"):
         local.pop(key), own.pop(key)
+    assert local.pop("triggers")[0]["topic"] == "dataset.prepared" and "triggers" not in own
     assert local == own
 
 
